@@ -251,6 +251,27 @@ if (-not $NoAutoStart) {
     $taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -StartWhenAvailable
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
+
+    $clientClear = Get-ClearText $clientSecret
+    try {
+        $healthy = $false
+        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3791/healthz' -Method Get -Headers @{ Authorization = 'Bearer ' + $clientClear } -TimeoutSec 2
+                if ($health.healthy -eq $true) {
+                    $healthy = $true
+                    break
+                }
+            } catch {
+                Start-Sleep -Milliseconds 500
+            }
+        }
+        if (-not $healthy) {
+            throw ('The Windows startup task registered, but authenticated health on 3791 did not succeed. Inspect ' + (Join-Path $stateRoot 'gateway.log'))
+        }
+    } finally {
+        $clientClear = $null
+    }
 }
 
 Write-Host 'AI Worker Gateway configuration installed without altering T3/Fleet source or data.'
