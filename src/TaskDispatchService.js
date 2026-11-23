@@ -187,7 +187,7 @@ export class TaskDispatchService {
             inputs.title = args.title;
         }
 
-        const result = await this._callUpstream('work_start', inputs);
+        const result = await this.upstream.callTool('work_start', inputs);
         return {
             ...result,
             content: [
