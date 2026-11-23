@@ -11,7 +11,8 @@ $scripts = @(
     'Start-WorkerGateway.ps1',
     'Get-WorkerGatewayStatus.ps1',
     'Show-WorkerGatewayClientToken.ps1',
-    'Uninstall-WorkerGateway.ps1'
+    'Uninstall-WorkerGateway.ps1',
+    'Register-T3Project.ps1'
 )
 
 foreach ($file in $scripts) {

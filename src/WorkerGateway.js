@@ -3,13 +3,15 @@ import { timingSafeEqual } from 'node:crypto';
 import { UpstreamMCPClient } from './UpstreamMCPClient.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { TaskDispatchService } from './TaskDispatchService.js';
+import { WorkspaceProvisionService } from './WorkspaceProvisionService.js';
 
 export class WorkerGateway {
-    constructor(config) {
+    constructor(config, services = {}) {
         this.config = config;
         this.upstream = new UpstreamMCPClient(config.upstreamURL, config.upstreamToken);
         this.workspaces = new WorkspaceService(config.workspaceRoot);
         this.taskDispatch = new TaskDispatchService(this.upstream, config.generalProject);
+        this.provision = new WorkspaceProvisionService(config, this.workspaces, this.upstream, services.projectAdapter);
         this.server = createServer((request, response) => {
             this._handleRequest(request, response).catch((error) => {
                 console.error('Worker Gateway request failed:', error.message);
@@ -58,6 +60,7 @@ export class WorkerGateway {
     _extensionTools() {
         return [
             ...this.taskDispatch.getTools(),
+            this.provision.getTool(),
             {
                 name: 'worker_workspace_plan',
                 description: 'Inspect an approved local workspace slug without modifying files. It does not create a T3 Project.',
@@ -112,6 +115,31 @@ export class WorkerGateway {
     async _handleMCP(payload, protocolVersion) {
         const extensionNames = new Set(this._extensionTools().map((tool) => tool.name));
         if (payload.method === 'tools/call' && extensionNames.has(payload.params?.name)) {
+            if (payload.params.name === 'worker_workspace_ensure') {
+                try {
+                    const value = await this.provision.ensure(payload.params.arguments);
+                    return {
+                        status: 200,
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: payload.id,
+                            result: {
+                                content: [{ type: 'text', text: JSON.stringify(value) }],
+                                structuredContent: value,
+                                isError: false,
+                            },
+                        }),
+                        contentType: 'application/json',
+                    };
+                } catch (error) {
+                    return {
+                        status: 200,
+                        body: JSON.stringify(this._toolResult(payload.id, error.message, true)),
+                        contentType: 'application/json',
+                    };
+                }
+            }
+
             if (this.taskDispatch.handles(payload.params.name)) {
                 try {
                     const result = await this.taskDispatch.run(payload.params.name, payload.params.arguments);
@@ -129,7 +157,7 @@ export class WorkerGateway {
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
             if (message.result && typeof message.result === 'object') {
-                const guide = 'Follow the installed Session Router Skill for intent routing: first identify existing jobs, distinguish follow-ups from independent new work, and select a suitable authorized workspace. The gateway offers fleet_status, work_list, work_start, work_continue, and optional worker_task_plan / worker_task_start helpers. A shortcut does not replace routing judgment or provision a missing T3 Project. If no authorized workspace is available, report the missing capability instead of silently using an unrelated Pilot project.';
+                const guide = 'Follow the installed Session Router Skill for intent routing: first identify existing jobs, distinguish follow-ups from independent new work, and select a suitable authorized workspace. The gateway offers fleet_status, work_list, work_start, work_continue and optional worker_task_plan / worker_task_start helpers. If no suitable workspace exists, use worker_workspace_ensure only when the operator has enabled safe T3 provisioning; it returns a Fleet target and optional modelSelection when dispatchReady is true. A shortcut does not replace routing judgment or provision a missing T3 Project. If no authorized workspace is available, report the missing capability instead of silently using an unrelated Pilot project.';
                 message.result.instructions = [message.result.instructions, guide].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }

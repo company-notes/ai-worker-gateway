@@ -122,7 +122,8 @@ test('assistant discovers upstream tools and extensions, starts an upstream job,
     assert.equal(tools.status, 200, 'MCP tool listing should succeed');
     assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), [
         'work_start', 'work_status', 'work_continue',
-        'worker_task_plan', 'worker_task_start', 'worker_workspace_plan', 'worker_workspace_prepare',
+        'worker_task_plan', 'worker_task_start', 'worker_workspace_ensure',
+        'worker_workspace_plan', 'worker_workspace_prepare',
     ], 'Agent should see upstream and local tools through one endpoint');
 
     const start = await environment.client.request('tools/call', { name: 'work_start', arguments: { task: 'Create a report' } });
