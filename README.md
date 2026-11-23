@@ -16,6 +16,12 @@ An independent, **local-only experimental MCP facade** that extends the original
 
 See [`.env.example`](.env.example) for names and [docs/architecture.md](docs/architecture.md) for the security contract and upstream update procedure.
 
+## Agent routing skill
+
+An optional [Gateway-neutral Session Router Skill](.agents/skills/session-router/SKILL.md) documents when to find, start, or continue jobs and explains why preparing a folder is not yet T3 Project registration. Each AI client still needs its own explicit MCP access.
+
+Open implementation milestones are tracked in [GitHub Issues](https://github.com/company-notes/ai-worker-gateway/issues).
+
 ## Checks
 
 `npm run check` runs JavaScript syntax checks and the focused real-HTTP MCP user scenario, with a local substitute for the external upstream when a live test instance has not been configured. GitHub Actions runs the same command. A real T3 end-to-end test is still required before production use.
