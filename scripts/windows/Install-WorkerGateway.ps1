@@ -91,7 +91,7 @@ if ($PlanOnly) {
     return
 }
 
-if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+if ($PSVersionTable.PSVersion.Major -ge 6 -and -not [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) {
     throw 'This installation script only supports Windows.'
 }
 
@@ -114,6 +114,9 @@ if (Test-LoopbackPort 3791) {
 }
 
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($NoAutoStart -and $null -ne $existingTask) {
+    throw 'An autostart task already exists. Remove it with Uninstall-WorkerGateway.ps1 before switching to manual-only mode.'
+}
 if ($null -ne $existingTask) {
     $owned = @($existingTask.Actions | Where-Object { $_.Arguments -like '*Start-WorkerGateway.ps1*' }).Count -eq 1
     if (-not $owned) { throw 'A different Windows scheduled task already uses AIWorkerGateway; refusing to overwrite it.' }
@@ -177,10 +180,14 @@ try {
     $request = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fleet_status","arguments":{}}}'
     $headers = @{ Authorization = 'Bearer ' + $upstreamClear; Accept = 'application/json' }
     $response = Invoke-RestMethod -Uri 'http://127.0.0.1:3790/mcp' -Method Post -Headers $headers -ContentType 'application/json' -Body $request -TimeoutSec 15
-    if ($null -ne $response.error -or $null -eq $response.result -or $response.result.isError -eq $true) {
+    if ($null -ne $response.PSObject.Properties['error'] -or $null -eq $response.PSObject.Properties['result']) {
         throw 'Fleet bearer token is not authorized to call fleet_status.'
     }
-    if (-not $response.result.structuredContent) {
+    $result = $response.result
+    if ($null -ne $result.PSObject.Properties['isError'] -and $result.isError -eq $true) {
+        throw 'Fleet bearer token is not authorized to call fleet_status.'
+    }
+    if ($null -eq $result.PSObject.Properties['structuredContent'] -or -not $result.structuredContent) {
         throw 'Fleet status did not include structuredContent; verify installed upstream compatibility before installation.'
     }
     if ($GeneralProject) {
