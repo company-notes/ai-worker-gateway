@@ -300,6 +300,8 @@ test('new assistant provisions an isolated marketing workspace, starts a new job
     const provisioned = created.body.result.structuredContent;
     assert.equal(provisioned.dispatchReady, true, 'Real project registration and Fleet launch permission are required');
     assert.deepEqual(provisioned.target, { host: 'my-pc', projectId: 't3-registered-0' });
+    assert.equal(environment.provisioningCalls[0].title, 'Marketing Tracker',
+        'The requested workspace title must be used when registering the T3 Project');
     assert.deepEqual(provisioned.modelSelection, { instanceId: 'approved-model-instance', model: 'approved-model' });
 
     const started = await environment.client.request('tools/call', {
