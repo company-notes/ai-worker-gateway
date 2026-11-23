@@ -16,6 +16,8 @@ An independent, **local-only experimental MCP facade** that extends the original
 
 See [`.env.example`](.env.example) for names and [docs/architecture.md](docs/architecture.md) for the security contract and upstream update procedure.
 
+**Already have T3/Fleet installed on Windows? Do not uninstall it.** Follow the [side-by-side Windows retest guide](docs/windows-retest.md) to connect this facade on port 3791 to the existing service on port 3790. The submodule is a source pin, not a second service installation.
+
 Operator configuration must also follow the [worker execution and workspace policy](docs/worker-policy.md).
 
 ## Agent routing skill
@@ -32,7 +34,6 @@ Open implementation milestones are tracked in [GitHub Issues](https://github.com
 
 - `src/`, `tests/`, `.github/workflows/` — current implementation and CI.
 - `upstream/t3-fleet-gateway/` — original upstream Git submodule; no changes, no copies of its internal modules.
-- `legacy/windows/` — retained historical Windows migration scripts, **not supported installers for this facade**.
 - `company-notes/ai-team-architecture` — private company architecture and validation history, not distributed with this public project.
 
 The adapter is intentionally thin. Upstream updates require a conscious submodule pin bump, contract checks and tests; blindly pulling a new upstream commit does not guarantee interoperability.
