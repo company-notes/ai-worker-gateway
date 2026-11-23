@@ -5,6 +5,10 @@ param(
     [string]$GeneralProject,
     [string]$SkillInstallDirectory,
     [string]$WorkspaceRoot,
+    [switch]$EnableProvisioning,
+    [string]$ProvisionHost,
+    [string]$ProvisionModelInstance,
+    [string]$ProvisionModel,
     [switch]$ForceSkillOverwrite,
     [switch]$RotateClientToken,
     [switch]$NoAutoStart,
@@ -87,6 +91,7 @@ if ($PlanOnly) {
         skillSource = $sourceSkill
         changesUpstream = $false
         createsWorkspaceProject = $false
+        enablesProvisioning = [bool]$EnableProvisioning
     }
     return
 }
@@ -196,6 +201,7 @@ try {
             throw 'GeneralProject is not an exactly matching, visible, start-enabled Fleet alias.'
         }
     }
+    $fleetStatus = $result.structuredContent
 } finally {
     $upstreamClear = $null
 }
@@ -213,6 +219,52 @@ if ((Get-ClearText $clientSecret) -eq (Get-ClearText $upstreamSecret)) {
 }
 
 Assert-PrivateFolder $stateRoot
+
+$provisionEnabled = $EnableProvisioning -or $PSBoundParameters.ContainsKey('ProvisionHost')
+if (-not $provisionEnabled -and $null -ne $existing -and $null -ne $existing.PSObject.Properties['provision_host']) {
+    $ProvisionHost = [string]$existing.provision_host
+    $provisionEnabled = -not [string]::IsNullOrWhiteSpace($ProvisionHost)
+}
+if ($provisionEnabled) {
+    if (-not $ProvisionHost) {
+        $candidates = @($fleetStatus.hosts | Where-Object {
+            $_.reachable -eq $true -and $_.discovery.enabled -eq $true -and $_.discovery.allowWorkStart -eq $true
+        })
+        if ($candidates.Count -ne 1) {
+            throw 'EnableProvisioning requires exactly one authorized, reachable host with Fleet discovery and work_start enabled, or an explicit -ProvisionHost.'
+        }
+        $ProvisionHost = [string]$candidates[0].id
+    }
+    $hostMatch = @($fleetStatus.hosts | Where-Object {
+        $_.id -eq $ProvisionHost -and $_.reachable -eq $true -and
+        $_.discovery.enabled -eq $true -and $_.discovery.allowWorkStart -eq $true
+    })
+    if ($hostMatch.Count -ne 1) {
+        throw 'ProvisionHost is not an authorized reachable Fleet host with discovery and work_start enabled.'
+    }
+
+    if (-not $WorkspaceRoot) {
+        $WorkspaceRoot = Join-Path $stateRoot 'workspaces'
+        Assert-PrivateFolder $WorkspaceRoot
+    }
+    if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) {
+        throw 'Provisioning WorkspaceRoot must be an existing directory.'
+    }
+}
+
+if ([bool]$ProvisionModelInstance -ne [bool]$ProvisionModel) {
+    throw 'ProvisionModelInstance and ProvisionModel must both be given, or neither.'
+}
+$provisionModelSelection = $null
+if ($ProvisionModelInstance -and $ProvisionModel) {
+    $provisionModelSelection = @{
+        instanceId = $ProvisionModelInstance
+        model = $ProvisionModel
+    }
+} elseif ($null -ne $existing -and $null -ne $existing.PSObject.Properties['provision_model_selection']) {
+    $provisionModelSelection = $existing.provision_model_selection
+}
+
 Save-Secret $upstreamSecret $upstreamSecretFile
 Save-Secret $clientSecret $clientSecretFile
 
@@ -224,6 +276,8 @@ $settings = @{
     upstreamURL = 'http://127.0.0.1:3790/mcp'
     generalProject = if ($GeneralProject) { $GeneralProject } else { $null }
     workspaceRoot = if ($WorkspaceRoot) { [IO.Path]::GetFullPath($WorkspaceRoot) } else { $null }
+    provision_host = if ($provisionEnabled) { $ProvisionHost } else { $null }
+    provision_model_selection = $provisionModelSelection
 }
 $encoded = $settings | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText($settingsFile, $encoded, (New-Object Text.UTF8Encoding($false)))
@@ -289,6 +343,13 @@ if ($NoAutoStart) {
 } else {
     Write-Host 'Automatic startup: Task Scheduler at YOUR Windows user logon (not before sign-in).'
 }
-if (-not $GeneralProject) {
-    Write-Warning 'No general-purpose Fleet alias configured. A new unrelated marketing task may be blocked until a suitable workspace is registered or an authorized upstream scratch default is configured.'
+if ($provisionEnabled) {
+    Write-Host ('Worker-local T3 Project provisioning enabled for host: ' + $ProvisionHost)
+    Write-Host ('Approved isolated Workspace root: ' + $WorkspaceRoot)
+    if (-not $provisionModelSelection) {
+        Write-Warning 'No provisioning model selected. A new T3 project without a default model cannot start a job until a model is configured.'
+    }
+    Write-Warning 'The Fleet client token must also have Operate and project visibility for NEW projects. A Pilot-only grant will block dispatch; this installer will not elevate it.'
+} elseif (-not $GeneralProject) {
+    Write-Warning 'No general-purpose Fleet alias or Worker Provisioning enabled. New unrelated work will be blocked until the operator configures a destination.'
 }
