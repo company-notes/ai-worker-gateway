@@ -111,6 +111,34 @@ Then, with your client token supplied only to your local MCP client's bearer-hea
 3. **Optional folder test:** set an isolated existing `AWG_WORKSPACE_ROOT` **before starting** the wrapper and restart only the wrapper; call `worker_workspace_plan` and `worker_workspace_prepare` with a disposable lowercase name such as `awg-smoke`. The result must report `dispatchReady: false`: this creates a folder, **not** a T3 project or dispatch target.
 4. **New job acceptance (separate, opt-in):** only after read-only calls succeed, obtain a **separate** `operate` upstream client grant limited to a disposable test project/host; configure it as `AWG_UPSTREAM_TOKEN` and restart only the wrapper. Ask your MCP client to create a fresh job with a new `requestId` in an already configured **test** project, read status/messages, and continue the **same** job. Observe T3 Desktop to learn whether any action still asks for approval. Do not rely on an old approved session. `auto` policy does not guarantee unattended completion.
 
+## E2. Upgrade the existing 3791 connection from read-only to the Pilot Operate grant
+
+If an upstream operator grant has **already been created**, do not mint another token unnecessarily and do not send that Fleet token to the 3791 MCP client. The two credentials are deliberately separate:
+
+| Credential | Configured at | Purpose |
+| --- | --- | --- |
+| `AWG_CLIENT_TOKEN` | The bot's authorization header to **3791** and the wrapper's environment | Authenticate the bot to the local wrapper |
+| `AWG_UPSTREAM_TOKEN` | The wrapper's environment only | Authenticate the wrapper to original Fleet Gateway **3790** |
+
+To change the upstream grant **without changing the bot's 3791 connection**, return to the exact PowerShell window where `npm start` is running:
+
+1. Press **Ctrl+C** to stop **only** the wrapper. Leave the original 3790/3773 services running.
+2. Keep `AWG_CLIENT_TOKEN` unchanged; do not rerun the random token generator, or the existing bot connection will receive 401 until updated.
+3. Set `AWG_UPSTREAM_TOKEN` to the new **Fleet client** Operate token, privately. If a temporary operator-controlled plaintext token file was created during the test, one local-only option is:
+
+```powershell
+$tokenFile = Join-Path $env:LOCALAPPDATA 'T3FleetGateway\omb-pilot-test-token.txt'
+$env:AWG_UPSTREAM_TOKEN = (Get-Content -Raw -LiteralPath $tokenFile).Trim()
+npm start
+```
+
+Do not commit, paste, echo or upload the token. Check access to the temporary file and remove it once you have an appropriate secure way to restart/restore the secret. The current wrapper is an experimental process: secrets in environment variables and local files require care.
+
+4. **Do not change the bot's MCP URL or inbound token.** It stays `http://127.0.0.1:3791/mcp` with the same `AWG_CLIENT_TOKEN`.
+5. From the existing **3791** client, test `fleet_status`, a **new** `work_start` with a unique `requestId` in the authorized test project, then `work_status`, `work_messages` and `work_continue` on that exact new job ID. Confirm forbidden projects stay hidden and record whether T3 Desktop requests approval. Tests executed **directly on 3790** validate the upstream and its permissions but **do not** validate the wrapper's operate forwarding.
+
+**Security:** All assistants sharing the same `AWG_CLIENT_TOKEN` use the same upstream grant. Replacing a read-only upstream token with an Operate token means the common 3791 entry point now has the scope of that Operate grant (currently only the allowed test project/host). This is a local pilot; multi-user identity/scoped grants must be implemented before public deployment.
+
 ## F. Stop / roll back
 
 Press Ctrl+C in the wrapper's window and remove its temporary `AWG_*` environment variables from that shell if needed. Nothing in your old T3/Gateway processes has been replaced. If you minted a temporary Fleet client token, revoke that **specific test client** using the installed CLI's documented `clients revoke <id>`; leave all other clients and hosts alone.
