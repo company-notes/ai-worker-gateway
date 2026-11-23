@@ -64,20 +64,26 @@ try {
 }
 ```
 
-The CLI displays the upstream token **once**. Store it privately; do not paste it in issues, chat, Git or logs. If your installed build does not support `clients token`, **stop this step** and inspect its own CLI help; do not copy host credentials or manually modify the database. You may later issue a separate short-lived `operate` token and restrict the client to the exact pilot/test project (when supported), after read-only testing is complete.
+The CLI displays the upstream token **once**. Store it privately; do not paste it in issues, chat, Git or logs. Replace `my-pc` with your installed Gateway's actual test Host ID if it differs. If your installed build does not support `clients token`, **stop this step** and inspect its own CLI help; do not copy host credentials or manually modify the database. You may later issue a separate short-lived `operate` token and restrict the client to the exact pilot/test project (when supported), after read-only testing is complete.
 
 In the PowerShell session in which you will run the new wrapper:
 
 ```powershell
 $env:AWG_CLIENT_TOKEN = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
-$env:AWG_UPSTREAM_TOKEN = Read-Host 'Paste the new Fleet client bearer token (input stays local)'
+$tokenSecure = Read-Host 'Paste the new Fleet client bearer token' -AsSecureString
+$tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($tokenSecure)
+try {
+    $env:AWG_UPSTREAM_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
+} finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
+}
 $env:AWG_UPSTREAM_MCP_URL = 'http://127.0.0.1:3790/mcp'
 $env:AWG_LISTEN_HOST = '127.0.0.1'
 $env:AWG_LISTEN_PORT = '3791'
 Remove-Item Env:AWG_WORKSPACE_ROOT -ErrorAction SilentlyContinue
 ```
 
-`Read-Host` does not write the secret to PowerShell command history, but it **does display the pasted input**. For a non-echoing prompt, use a secure secret-entry method compatible with your local PowerShell environment. Do not persist these values in your repo. If other users can access the same Windows account, keep a separate low-privilege test profile.
+The prompt uses a non-echoing SecureString input and copies the value only into this process's environment for the test; environment variables are still accessible to processes with the same privilege boundary. Do not persist these values in your repo or paste them in reports. Do not screenshot token output. If other users can access the same Windows account, keep a separate low-privilege test profile.
 
 ## D. Run the wrapper side by side
 
@@ -90,7 +96,7 @@ npm start
 
 Expected output includes `AI Worker Gateway listening on 127.0.0.1:3791`. Keep this window open for the smoke test. The original Gateway remains on port 3790 and T3 on 3773. `npm start` does **not** install a Windows service; Ctrl+C stops only this wrapper process.
 
-In another PowerShell window, check the new listener:
+In another PowerShell window, check the new listener (the second shell does not automatically inherit the secrets set in the first window):
 
 ```powershell
 Test-NetConnection 127.0.0.1 -Port 3791
