@@ -39,8 +39,16 @@ $env:AWG_LISTEN_PORT = [string]$settings.listenPort
 
 Remove-Item Env:AWG_WORKSPACE_ROOT -ErrorAction SilentlyContinue
 Remove-Item Env:AWG_GENERAL_PROJECT -ErrorAction SilentlyContinue
+Remove-Item Env:AWG_PROVISION_HOST -ErrorAction SilentlyContinue
+Remove-Item Env:AWG_PROVISION_MODEL_SELECTION -ErrorAction SilentlyContinue
 if ($settings.workspaceRoot) { $env:AWG_WORKSPACE_ROOT = [string]$settings.workspaceRoot }
 if ($settings.generalProject) { $env:AWG_GENERAL_PROJECT = [string]$settings.generalProject }
+if ($null -ne $settings.PSObject.Properties['provision_host'] -and $settings.provision_host) {
+    $env:AWG_PROVISION_HOST = [string]$settings.provision_host
+}
+if ($null -ne $settings.PSObject.Properties['provision_model_selection'] -and $settings.provision_model_selection) {
+    $env:AWG_PROVISION_MODEL_SELECTION = $settings.provision_model_selection | ConvertTo-Json -Depth 10 -Compress
+}
 
 $logFile = Join-Path $stateRoot 'gateway.log'
 Push-Location -LiteralPath $settings.repoRoot

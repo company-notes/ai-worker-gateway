@@ -19,8 +19,8 @@ description: 依自然語言工作意圖判斷查詢、延續既有 Job、建立
 2. 判斷意圖：只是查進度、不建立工作；明確說「繼續／修改剛才的工作」時先找原 Job；要求新成果、獨立任務時才考慮新 Job。若正式公司工作系統已授權，先確認相關 Card／Ticket 與驗收條件。
 3. 找 Job：查詢可見的 work_list、work_status、work_messages（或 Gateway 提供的等價工具）。如果有且只有一個正確、可續作的 Job，使用 work_continue，保留 Job ID；若多個候選，詢問一個區分問題；終態失敗或取消 Job 不可假裝續活。
 4. 對獨立新工作，檢查 fleet_status、fleet_projects 或同等 Workspace 發現能力，選擇**適合任務且已授權**的執行目的地。新話題不必然建立新的 Project；已有適當 Workspace 時，在同一 Workspace 開新的 Job。
-5. 如果找不到合適的執行空間，先檢查 Gateway 是否**真的提供**有授權的 Workspace ensure/provisioning 能力；只有提供且符合實際 schema 才呼叫。單純 prepare 本機資料夾不代表可派工。沒有註冊能力時明確回報缺口，不能暗中落到 Pilot、無關客戶 Project 或任意 Scratch。
-6. 確認合法目的地之後，透過 Gateway 呼叫 work_start 或它公開的等價能力，傳入完整工作、可驗收成果、限制和唯一 requestId。發生不確定回覆時重試必須使用**同一 requestId 和相同參數**，避免重複 Job。
+5. 如果找不到合適的執行空間，先檢查 Gateway 是否提供且管理員已啟用 `worker_workspace_ensure`（或等價的受控 Workspace Provisioning）。若有，為這個獨立工作取穩定且具區辨性的英文小寫 slug，呼叫 `worker_workspace_ensure({name, requestId, title?})`；只有回傳 `dispatchReady: true`，才使用回傳的 `target` 與可選 `modelSelection` 派工。`worker_workspace_prepare` 只建立資料夾，不能作為已註冊 Project。若缺少 Host、模型、Fleet 的新專案權限、Git 或註冊能力，明確回報阻斷；不能暗中落到 Pilot、無關客戶 Project 或任意 Scratch。
+6. 確認合法目的地之後，透過 Gateway 呼叫 `work_start` 或它公開的等價能力，傳入完整工作、可驗收成果、限制和唯一 requestId。發生不確定回覆時重試必須使用**同一 requestId 和相同參數**，避免重複 Job。
 7. 拿到真正的 Job ID 後，用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆和交付物。需核准或輸入時如實回報，不得假稱自動完成。
 8. 若要跨不同 Worker 或公司團隊交接，依正式工作系統與成果路徑移交；不要假設兩台機器可以共享同一個底層 Thread。
 

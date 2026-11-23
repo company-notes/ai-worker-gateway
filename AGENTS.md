@@ -6,7 +6,7 @@ Follow the supplied CODE_PRINCIPLES and TESTING guides in development environmen
 - Keep service, transport, configuration and workspace responsibilities in separate classes; prefer early returns and fail fast rather than silent fallbacks.
 - Maintain the official upstream gateway as a pinned, untouched Git submodule. Never import from `upstream/t3-fleet-gateway/src/` or write to its private SQLite database.
 - An assistant's routing policy is the Session Router Skill: inspect existing Job/workspace, determine follow-up vs new task, then use authorized MCP tools. MCP instructions and optional task helpers supplement rather than replace the Skill. Never silently select an unrelated Pilot alias.
-- Only an existing operator-approved `AWG_GENERAL_PROJECT` or official upstream scratch target can be used as a generic destination; folder preparation is not Project registration.
+- An explicitly authorized existing project, upstream scratch target, or `worker_workspace_ensure` verified local T3 project may be used. The new provisioning path needs AWG_WORKSPACE_ROOT, AWG_PROVISION_HOST, Git and an authorized Fleet discovery target; folder preparation is not Project registration.
 - The extension facade must not escalate access: inbound requests need an independent client credential; upstream has its own token.
 - Never expose this pilot facade on a non-loopback interface; production remote OAuth and per-client ACL are future work.
 - When a real bug is found: create an observable failing regression test, fix it, rerun tests, then review spacing and rerun again.
