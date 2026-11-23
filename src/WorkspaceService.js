@@ -60,9 +60,11 @@ export class WorkspaceService {
         const root = await this._getRoot();
         const workspacePath = path.join(root, name);
         const existing = await this._inspectWorkspace(workspacePath);
+        let created = false;
         if (!existing) {
             try {
                 await fileSystem.mkdir(workspacePath, { mode: 0o700 });
+                created = true;
             } catch (error) {
                 if (error.code !== 'EEXIST') {
                     throw error;
@@ -73,7 +75,7 @@ export class WorkspaceService {
 
         return {
             workspaceName: name,
-            created: !existing,
+            created,
             dispatchReady: false,
             registrationRequired: true,
             explanation: 'Folder prepared; the operator must register the project with T3 and approve its Fleet policy before dispatch.',

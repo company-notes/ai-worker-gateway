@@ -140,3 +140,16 @@ test('configuration rejects public listeners and insecure remote upstream endpoi
     assert.throws(() => WorkerConfig.fromEnvironment({ ...base, AWG_UPSTREAM_MCP_URL: 'http://example.com/mcp' }), /HTTPS/,
         'Remote upstream connection must require encryption');
 });
+
+test('two simultaneous requests prepare a workspace once and both reuse the same folder', async () => {
+    const requests = await Promise.all([
+        environment.client.request('tools/call', {
+            name: 'worker_workspace_prepare', arguments: { name: 'concurrent-setup' },
+        }),
+        environment.client.request('tools/call', {
+            name: 'worker_workspace_prepare', arguments: { name: 'concurrent-setup' },
+        }),
+    ]);
+    const createdFlags = requests.map((response) => JSON.parse(response.body.result.content[0].text).created);
+    assert.deepEqual(createdFlags.sort(), [false, true], 'Only the request that actually created the folder should say created');
+});
