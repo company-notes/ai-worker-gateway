@@ -13,9 +13,9 @@ This is the actual product requirement: a **brand-new assistant with no access t
 
 Without one of these destinations the gateway must **refuse** arbitrary work rather than use an unrelated `pilot`, FileShare or ffl-mcp project. `worker_workspace_prepare` alone is **not** sufficient: it never registers a T3 Project.
 
-## Blind test: do NOT preload the agent with special instructions
+## Blind test: install Session Router Skill, but no previous conversation
 
-Create a fresh agent or fresh conversation. Its entire setup should be one MCP connection to `http://127.0.0.1:3791/mcp` using its inbound client bearer. Do **not** load the old private conversation, paste this guide into the agent, install the repo Skill, configure the original 3790 MCP, or mention T3. It should discover the workflow from MCP tool descriptions and server initialize instructions.
+Create a brand-new agent or fresh conversation. **Install and enable the published `session-router` Skill once**, plus exactly one MCP connection to `http://127.0.0.1:3791/mcp` using its inbound client bearer. Do **not** load the old private conversation, paste this guide as a prompt, configure the original 3790 MCP, or mention T3. The Skill supplies intent routing; tool descriptions and live status supply capabilities. The agent should work without remembering any previous chat.
 
 ### Scenario A — new unrelated marketing task
 
@@ -24,9 +24,9 @@ Say only:
 > 幫我做一個行銷成效追蹤工具，可以匯入每週的活動數據、計算轉換率，最後給我一份能查看的成果。
 
 Expected:
-- Agent discovers `worker_task_plan` / `worker_task_start` on its own.
-- Plan chooses only an authorized general-work alias or one verified scratch default; **never** the unrelated `pilot` merely because it is the only configured alias.
-- Agent starts one fresh `work_start` with a new `requestId`, returns the real new Job ID and follows `work_status` / `work_messages`.
+- Agent follows the Session Router Skill: discovers available Gateway tools, searches relevant Job/Workspace, and chooses new Job only when appropriate. `worker_task_plan` / `worker_task_start` are optional helpers, not a second routing authority.
+- Routing chooses an existing related authorized workspace if present; for general work it may use an authorized general-work alias or verified scratch default; **never** unrelated `pilot` merely because it is the only configured alias.
+- Agent starts one fresh job through the Gateway using `work_start` (or a safe exposed helper), with a new `requestId`, returns the real new Job ID and follows `work_status` / `work_messages`.
 - Check the delivered files or report, not just an `idle` state. Missing upstream model, policy, authorization or workspace is a **failure**, not something the assistant may invent.
 
 ### Scenario B — continuation
@@ -35,7 +35,7 @@ Then say:
 
 > 剛才那個工具再加上 CSV 匯出功能。
 
-Expected: same Job ID / T3 thread; `work_continue`, not a second `worker_task_start`. If several jobs match, assistant must ask which one.
+Expected: same Job ID / T3 thread; `work_continue`, not a second start. If several jobs match, assistant must ask which one.
 
 ### Scenario C — separate unrelated job
 
