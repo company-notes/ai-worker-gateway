@@ -41,6 +41,15 @@ export class WorkspaceService {
         return true;
     }
 
+    async pathFor(name) {
+        this._validateName(name);
+        const root = await this._getRoot();
+        const workspacePath = path.join(root, name);
+        await this._inspectWorkspace(workspacePath);
+
+        return workspacePath;
+    }
+
     async plan(name) {
         this._validateName(name);
         const root = await this._getRoot();

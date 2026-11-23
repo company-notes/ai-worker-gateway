@@ -1,7 +1,36 @@
+import { randomUUID } from 'node:crypto';
+
 export class UpstreamMCPClient {
     constructor(upstreamURL, token) {
         this.upstreamURL = upstreamURL;
         this.token = token;
+    }
+
+    async callTool(name, args) {
+        const payload = {
+            jsonrpc: '2.0',
+            id: randomUUID(),
+            method: 'tools/call',
+            params: { name, arguments: args },
+        };
+        const response = await this.forward(payload);
+        if (response.status !== 200 || !response.contentType.includes('application/json')) {
+            throw new Error('Upstream Fleet tool unavailable (HTTP ' + response.status + ')');
+        }
+
+        const message = JSON.parse(response.body);
+        if (message.error) {
+            throw new Error('Upstream ' + name + ' rejected the request: ' + (message.error.message ?? 'unknown error'));
+        }
+        if (!message.result || !Array.isArray(message.result.content)) {
+            throw new Error('Upstream ' + name + ' returned an invalid MCP result');
+        }
+        if (message.result.isError) {
+            const details = message.result.content.map((part) => part.text ?? '').join(' ');
+            throw new Error('Upstream ' + name + ' failed: ' + details.slice(0, 1200));
+        }
+
+        return message.result;
     }
 
     async forward(payload, protocolVersion) {

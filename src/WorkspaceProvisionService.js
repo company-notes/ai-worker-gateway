@@ -1,0 +1,192 @@
+import { promises as fileSystem } from 'node:fs';
+import path from 'node:path';
+import { GitWorkspaceBootstrapper } from './GitWorkspaceBootstrapper.js';
+import { T3ProjectAdapter } from './T3ProjectAdapter.js';
+
+export class WorkspaceProvisionService {
+    constructor(config, workspaces, upstream, projectAdapter = new T3ProjectAdapter()) {
+        this.config = config;
+        this.workspaces = workspaces;
+        this.upstream = upstream;
+        this.projectAdapter = projectAdapter;
+        this.bootstrapper = new GitWorkspaceBootstrapper();
+        this.inFlight = new Map();
+    }
+
+    getTool() {
+        return {
+            name: 'worker_workspace_ensure',
+            description: 'When Session Router determines that a NEW independent task has no suitable existing Worker workspace, create or reuse one isolated Git workspace under the operator-approved local root, register it through the installed T3 CLI, then verify the REAL authorized Fleet project and its dispatch policy. Does NOT create a company Card/Ticket. Call only if provisioning was configured by the operator; after dispatchReady=true pass target and optional modelSelection to official work_start. Never use unrelated pilot implicitly; on failure do not dispatch.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    name: { type: 'string', description: 'Unique lowercase project slug; 1-63 lowercase letters, digits and hyphens.' },
+                    title: { type: 'string', description: 'Optional human-readable display title; defaults to the workspace slug.' },
+                    requestId: { type: 'string', description: 'Stable idempotency key for this provisioning request; reuse when retrying.' },
+                },
+                required: ['name', 'requestId'],
+                additionalProperties: false,
+            },
+        };
+    }
+
+    _validate(args) {
+        if (!args || typeof args !== 'object' || Array.isArray(args) ||
+            Object.keys(args).some((key) => !['name', 'title', 'requestId'].includes(key))) {
+            throw new Error('Expected only name, optional title and requestId');
+        }
+        if (typeof args.name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(args.name)) {
+            throw new Error('Workspace name must be a lowercase slug of 1-63 letters, digits or hyphens');
+        }
+        if (typeof args.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(args.requestId)) {
+            throw new Error('requestId must be 1-128 letters, digits, dots, underscores, colons or hyphens');
+        }
+        if (args.title !== undefined && (typeof args.title !== 'string' || !args.title.trim() ||
+            args.title.length > 120 || /[\r\n]/.test(args.title))) {
+            throw new Error('Title must be a nonempty single line, at most 120 characters');
+        }
+    }
+
+    async _readFleetStatus() {
+        const response = await this.upstream.callTool('fleet_status', {});
+        const status = response.structuredContent;
+        if (!status || !Array.isArray(status.hosts)) {
+            throw new Error('Cannot verify authorized Fleet hosts');
+        }
+
+        return status;
+    }
+
+    async _assertHostAuthorized() {
+        if (!this.config.provisionHost || !this.config.workspaceRoot) {
+            throw new Error('Workspace provisioning is disabled. Operator must configure AWG_WORKSPACE_ROOT and AWG_PROVISION_HOST');
+        }
+        const status = await this._readFleetStatus();
+        const host = status.hosts.find((candidate) => candidate.id === this.config.provisionHost);
+        if (!host || host.reachable !== true || host.discovery?.enabled !== true ||
+            host.discovery?.allowWorkStart !== true) {
+            throw new Error('Provisioning host must be reachable, authorized and allow Fleet discovery work_start');
+        }
+
+        return host;
+    }
+
+    async _findProject(projectId) {
+        let cursor = null;
+        const seen = new Set();
+        for (let page = 0; page < 32; page++) {
+            const args = cursor
+                ? { host: this.config.provisionHost, cursor }
+                : { host: this.config.provisionHost, refresh: true };
+            const response = await this.upstream.callTool('fleet_projects', args);
+            const catalog = response.structuredContent;
+            const pageData = catalog?.hosts?.find((host) => host.host === this.config.provisionHost);
+            if (!pageData || pageData.available !== true || !Array.isArray(pageData.projects)) {
+                throw new Error('Fleet project catalog is unavailable for the authorized host');
+            }
+
+            const found = pageData.projects.find((project) => project.projectId === projectId);
+            if (found) {
+                return found;
+            }
+            cursor = pageData.nextCursor ?? null;
+            if (!cursor) {
+                return null;
+            }
+            if (seen.has(cursor)) {
+                throw new Error('Fleet project catalog repeated a page cursor');
+            }
+            seen.add(cursor);
+        }
+
+        throw new Error('Fleet project catalog exceeds the verification page limit');
+    }
+
+    async _readMarker(workspacePath, name) {
+        const markerPath = path.join(workspacePath, '.awg-provision.json');
+        let status;
+        try {
+            status = await fileSystem.lstat(markerPath);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                return null;
+            }
+            throw error;
+        }
+        if (!status.isFile() || status.isSymbolicLink()) {
+            throw new Error('Workspace registration marker is not a regular file');
+        }
+        const data = JSON.parse(await fileSystem.readFile(markerPath, 'utf8'));
+        if (data.workspace_name !== name || data.host_id !== this.config.provisionHost ||
+            typeof data.project_id !== 'string' || !/^[0-9a-z-]{8,100}$/i.test(data.project_id)) {
+            throw new Error('Workspace registration marker does not match this authorized host and name');
+        }
+
+        return data.project_id;
+    }
+
+    async _saveMarker(workspacePath, name, projectId) {
+        const markerPath = path.join(workspacePath, '.awg-provision.json');
+        await fileSystem.writeFile(markerPath, JSON.stringify({
+            workspace_name: name,
+            host_id: this.config.provisionHost,
+            project_id: projectId,
+        }) + '\n', { flag: 'wx', mode: 0o600 });
+    }
+
+    async _ensure(args) {
+        await this._assertHostAuthorized();
+        const workspacePath = await this.workspaces.pathFor(args.name);
+        const existingMarker = await this._readMarker(workspacePath, args.name);
+        let projectId = existingMarker;
+
+        if (!projectId) {
+            const result = await this.workspaces.plan(args.name);
+            if (result.exists) {
+                throw new Error('Workspace exists without a trusted registration marker; operator must reconcile it before retrying');
+            }
+
+            const title = 'AWG-' + args.name;
+            await this.workspaces.prepare(args.name);
+            await this.bootstrapper.initialize(workspacePath, title);
+            projectId = await this.projectAdapter.register(workspacePath, title);
+            await this._saveMarker(workspacePath, args.name, projectId);
+        }
+
+        const project = await this._findProject(projectId);
+        if (!project || project.launch?.allowed !== true || project.name !== 'AWG-' + args.name) {
+            throw new Error('T3 project exists but the Fleet client cannot verify an allowed dispatch target. Grant this project to the wrapper client and enable host discovery; no job has been dispatched');
+        }
+
+        const modelSelection = this.config.provisionModelSelection ?? null;
+        if (!project.launch.defaultModelSource && !modelSelection) {
+            throw new Error('Registered project is visible but lacks a launch model. Operator: set AWG_PROVISION_MODEL_SELECTION from the authorized fleet_models catalog');
+        }
+
+        return {
+            workspaceName: args.name,
+            host: this.config.provisionHost,
+            target: { host: this.config.provisionHost, projectId },
+            modelSelection,
+            dispatchReady: true,
+            created: existingMarker === null,
+            explanation: 'T3 Project is registered and visible to Fleet. Use official work_start with target and modelSelection; a new company Card was not created.',
+        };
+    }
+
+    async ensure(args) {
+        this._validate(args);
+        const previous = this.inFlight.get(args.name);
+        if (previous) {
+            return previous;
+        }
+
+        const pending = this._ensure(args);
+        this.inFlight.set(args.name, pending);
+        try {
+            return await pending;
+        } finally {
+            this.inFlight.delete(args.name);
+        }
+    }
+}

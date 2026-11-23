@@ -9,6 +9,8 @@ export class WorkerConfig {
         const upstreamToken = environment.AWG_UPSTREAM_TOKEN;
         const workspaceRoot = environment.AWG_WORKSPACE_ROOT ?? null;
         const generalProject = environment.AWG_GENERAL_PROJECT ?? null;
+        const provisionHost = environment.AWG_PROVISION_HOST ?? null;
+        const selectionJSON = environment.AWG_PROVISION_MODEL_SELECTION ?? null;
 
         if (listenHost !== '127.0.0.1' && listenHost !== '::1') {
             throw new Error('AWG_LISTEN_HOST must be loopback; public access is not supported');
@@ -38,6 +40,36 @@ export class WorkerConfig {
         if (generalProject !== null && !/^[a-zA-Z0-9._-]{1,64}$/.test(generalProject)) {
             throw new Error('AWG_GENERAL_PROJECT must be an exact existing Fleet project alias');
         }
+        if (provisionHost !== null && !/^[a-z0-9][a-z0-9-]{0,31}$/.test(provisionHost)) {
+            throw new Error('AWG_PROVISION_HOST must be an exact authorized local Fleet host ID');
+        }
+        if (provisionHost && !workspaceRoot) {
+            throw new Error('AWG_PROVISION_HOST requires an existing AWG_WORKSPACE_ROOT');
+        }
+
+        let provisionModelSelection = null;
+        if (selectionJSON !== null) {
+            if (selectionJSON.length > 4096) {
+                throw new Error('AWG_PROVISION_MODEL_SELECTION is too long');
+            }
+
+            try {
+                provisionModelSelection = JSON.parse(selectionJSON);
+            } catch {
+                throw new Error('AWG_PROVISION_MODEL_SELECTION must be valid JSON');
+            }
+            if (provisionModelSelection === null || typeof provisionModelSelection !== 'object' ||
+                Array.isArray(provisionModelSelection) ||
+                typeof provisionModelSelection.instanceId !== 'string' || !provisionModelSelection.instanceId ||
+                typeof provisionModelSelection.model !== 'string' || !provisionModelSelection.model ||
+                Object.keys(provisionModelSelection).some((key) => !['instanceId', 'model', 'options'].includes(key)) ||
+                (provisionModelSelection.options !== undefined &&
+                    (typeof provisionModelSelection.options !== 'object' || provisionModelSelection.options === null ||
+                        Array.isArray(provisionModelSelection.options)))) {
+                throw new Error('AWG_PROVISION_MODEL_SELECTION must contain an instanceId, model and optional options');
+            }
+        }
+
         if (workspaceRoot !== null && workspaceRoot.trim() === '') {
             throw new Error('AWG_WORKSPACE_ROOT cannot be empty');
         }
@@ -53,6 +85,8 @@ export class WorkerConfig {
             upstreamToken,
             workspaceRoot,
             generalProject,
+            provisionHost,
+            provisionModelSelection,
         });
     }
 

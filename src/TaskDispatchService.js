@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 export class TaskDispatchService {
     constructor(upstream, generalProject = null) {
         this.upstream = upstream;
@@ -88,35 +86,8 @@ export class TaskDispatchService {
         }
     }
 
-    async _callUpstream(name, args) {
-        const response = await this.upstream.forward({
-            jsonrpc: '2.0',
-            id: randomUUID(),
-            method: 'tools/call',
-            params: { name, arguments: args },
-        });
-
-        if (response.status !== 200 || !response.contentType.includes('application/json')) {
-            throw new Error('Upstream Fleet tool unavailable (HTTP ' + response.status + ')');
-        }
-
-        const message = JSON.parse(response.body);
-        if (message.error) {
-            throw new Error('Upstream ' + name + ' rejected the request: ' + (message.error.message ?? 'unknown error'));
-        }
-        if (!message.result || !Array.isArray(message.result.content)) {
-            throw new Error('Upstream ' + name + ' returned an invalid MCP tool result');
-        }
-
-        return message.result;
-    }
-
     async _readStatus() {
-        const response = await this._callUpstream('fleet_status', {});
-        if (response.isError) {
-            throw new Error('Cannot inspect authorized Fleet destinations: ' + response.content.map((part) => part.text ?? '').join(' '));
-        }
-
+        const response = await this.upstream.callTool('fleet_status', {});
         const status = response.structuredContent;
         if (!status || !Array.isArray(status.hosts) || !Array.isArray(status.projects)) {
             throw new Error('fleet_status did not return its expected structured host/project catalog');
