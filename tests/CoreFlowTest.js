@@ -65,6 +65,14 @@ class GatewayTestEnvironment {
                     ? { content: [{ type: 'text', text: JSON.stringify(status) }], structuredContent: status }
                     : payload.method === 'tools/call' && payload.params.name === 'fleet_projects'
                         ? { content: [{ type: 'text', text: JSON.stringify(projectsCatalog) }], structuredContent: projectsCatalog }
+                        : payload.method === 'tools/call' && payload.params.name === 'fleet_models'
+                            ? { content: [{ type: 'text', text: 'Approved models' }],
+                                structuredContent: {
+                                    hosts: [{ host: 'my-pc', available: true, models: [{
+                                        providerInstanceId: 'approved-model-instance', modelId: 'approved-model',
+                                        options: [],
+                                    }] }],
+                                } }
                     : payload.method === 'tools/call'
                         ? {
                             content: [{ type: 'text', text: payload.params.name === 'work_start' ? 'job-123' : payload.params.name === 'work_status' ? 'running:job-123' : 'continued:job-123' }],
@@ -347,4 +355,42 @@ test('unauthorized or unverified provisioning cannot dispatch a new project', as
     } finally {
         environment.hideProvisionedProjects = false;
     }
+});
+
+test('provisioning refuses a model that Fleet does not advertise before touching local workspace', async () => {
+    const existing = environment.gateway.provision.config.provisionModelSelection;
+    const countBefore = environment.provisioningCalls.length;
+    environment.gateway.provision.config.provisionModelSelection = {
+        instanceId: 'unknown-model-instance', model: 'unavailable-model',
+    };
+    try {
+        const attempted = await environment.client.request('tools/call', {
+            name: 'worker_workspace_ensure',
+            arguments: { name: 'invalid-model-case', requestId: 'invalid-model-1' },
+        });
+        assert.equal(attempted.body.result.isError, true,
+            'The adapter must reject unavailable models before T3 project creation');
+        assert.equal(environment.provisioningCalls.length, countBefore,
+            'Invalid model configuration must not create a T3 Project');
+    } finally {
+        environment.gateway.provision.config.provisionModelSelection = existing;
+    }
+});
+
+test('parallel calls ensure only one T3 project, even without prior assistant conversation', async () => {
+    const before = environment.provisioningCalls.length;
+    const [first, second] = await Promise.all([
+        environment.client.request('tools/call', {
+            name: 'worker_workspace_ensure',
+            arguments: { name: 'content-calendar', requestId: 'content-ensure-a' },
+        }),
+        environment.client.request('tools/call', {
+            name: 'worker_workspace_ensure',
+            arguments: { name: 'content-calendar', requestId: 'content-ensure-b' },
+        }),
+    ]);
+    assert.equal(first.body.result.structuredContent.target.projectId,
+        second.body.result.structuredContent.target.projectId);
+    assert.equal(environment.provisioningCalls.length, before + 1,
+        'Two concurrent assistants must not register duplicate T3 Projects');
 });
