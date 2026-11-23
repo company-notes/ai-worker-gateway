@@ -8,9 +8,10 @@ AI assistant → **AI Worker Gateway (loopback pilot, MCP entry)** → **unmodif
 
 ## Behavior in v0.1
 
-- The facade forwards JSON-RPC MCP messages to the upstream MCP HTTP server using a dedicated upstream bearer token. For `tools/list` it appends local tools, and for two local `tools/call` names it handles requests itself. Other MCP methods, tool calls and upstream result IDs stay untouched.
+- The facade forwards JSON-RPC MCP messages to the upstream MCP HTTP server using a dedicated upstream bearer token. For `tools/list` it appends local task-routing and workspace tools. `initialize` includes a short delegation guide for clients that expose MCP server instructions. Other MCP methods, tool calls and upstream result IDs stay untouched.
 - The facade is **loopback-only** and uses a distinct inbound bearer token. It does not implement upstream OAuth for agents; remote deployment, user/tenant identity and per-client policies are not ready. It must never be placed behind an unauthenticated tunnel.
 - `worker_workspace_plan` inspects one direct child of an approved operator-supplied root without changing it; `worker_workspace_prepare` creates/reuses only that child folder. These tools do **not** create a T3 Project, configure a Fleet alias or launch a job. Both report `dispatchReady: false`.
+- `worker_task_plan` queries authorized `fleet_status` data and chooses only an explicitly named project, operator configured `AWG_GENERAL_PROJECT`, or one upstream pinned scratch default. `worker_task_start` then uses original `work_start` with its `requestId`; it never invents a Project or resumes an unrelated job. If there is no safe default, it blocks before creating a job.
 - Projects must first be explicitly registered/configured in the upstream stack; only then should assistants use upstream `work_start` with an authorized target. For non-project work, consider upstream's existing scratch-project target rather than inventing Project Create.
 - For tested runtime, the upstream endpoint is expected to respond to `tools/list` in JSON mode (as documented by upstream). No streaming / resumable MCP proxying is implemented. An SSE-mode tools/list is an explicit error.
 

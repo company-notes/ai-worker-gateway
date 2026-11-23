@@ -146,3 +146,17 @@ Press Ctrl+C in the wrapper's window and remove its temporary `AWG_*` environmen
 Do **not** run historical `Install-T3FleetGateway.ps1` or a patching `Fix-T3FleetGateway.ps1` as part of this retest. The old installers are preserved in Git history, not in the current tree.
 
 Known limits: the current facade is a loopback pilot with a single static inbound client identity and JSON-only MCP forwarding. Actual compatibility with your installed Fleet Gateway/T3/Windows and OpenMausBot authorization has **not yet been demonstrated**. Record the first failing tool/status without leaking token values, then fix the adapter or configuration rather than deleting working software.
+
+## G. Zero-context new-assistant task routing (the main acceptance scenario)
+
+Read the [full zero-context scenario](agent-zero-context-test.md). The key difference from the old token/proxy smoke test: the new assistant should be asked to do **real new work**, without earlier conversation history or knowing that T3 exists.
+
+Before launching the wrapper, the operator must configure a suitable general execution destination once (e.g. `AWG_GENERAL_PROJECT=general-work`, where `general-work` is an authorized alias already registered with the Fleet Gateway; or the original gateway's verified scratch default). Do not point unrelated marketing tasks at `pilot` by convenience. Ensure that 3791's existing upstream client has Operate permission for that destination. The bot only receives the 3791 MCP URL and inbound token; no separate 3790 MCP is required.
+
+In an empty assistant conversation, send **only**:
+
+> 幫我做一個行銷成效追蹤工具，能匯入每週活動數據、算轉換率，最後給我一份可查看的成果。
+
+Observe: `worker_task_plan` and `worker_task_start` visible/used, one fresh Fleet Job ID, authorized general host/workspace, `work_status` / `work_messages` progress, deliverable verified rather than just an idle status. Then say "幫我在剛才那個工具加上 CSV 匯出" and verify `work_continue` uses the same ID. Then order a separate product-video script and verify another Job ID. An unknown workspace must **not** silently use Pilot.
+
+If the plan reports no general destination, **the acceptance has not passed**. It identifies the one-time operator configuration still missing; setting environment variables alone does not create or register a T3 project.

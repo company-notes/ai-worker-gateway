@@ -2,9 +2,9 @@
 
 An independent, **local-only experimental MCP facade** that extends the original [T3 Fleet Gateway](https://github.com/boundsj/t3-fleet-gateway) without modifying its code. Its upstream is pinned in `upstream/t3-fleet-gateway/` as a Git submodule; the extension's code lives only under `src/`.
 
-**What works now:** an authenticated single MCP endpoint forwards upstream `initialize`, `tools/list`, `work_start`, `work_status`, `work_continue` and other JSON-RPC methods; tool discovery adds two new local tools for planning and preparing a workspace folder under an administrator-approved root. The underlying job engine, data, access control and T3 service remain untouched.
+**What works now:** an authenticated single MCP endpoint forwards existing upstream jobs and tools, and advertises a self-describing natural-language workflow (`worker_task_plan` → `worker_task_start`). A new assistant can discover those tools directly from MCP without reading this repository or earlier chat messages. Local `worker_workspace_plan`/`worker_workspace_prepare` still only inspect/create folders. The underlying job engine, data, access control and T3 service remain untouched.
 
-**Not yet supported:** end-to-end T3 Project registration, automatic dispatch from a newly prepared workspace, remote OAuth, multi-user tenant isolation, and live Windows/T3 acceptance. `worker_workspace_prepare` deliberately reports `dispatchReady: false` and requires operator registration. Do not confuse a prepared directory with a new company project or a registered T3 Project.
+**Not yet supported:** automatic creation/registration of a previously unknown T3 Project, dynamic semantic classification across multiple worker projects, remote OAuth, multi-user tenant isolation, and live Windows/T3 acceptance **of the new high-level task tools**. `worker_workspace_prepare` deliberately reports `dispatchReady: false` and requires operator registration. Do not confuse a prepared directory with a new company project or a registered T3 Project.
 
 ## Quick start (dedicated test account, loopback only)
 
@@ -19,6 +19,14 @@ See [`.env.example`](.env.example) for names and [docs/architecture.md](docs/arc
 **Already have T3/Fleet installed on Windows? Do not uninstall it.** Follow the [side-by-side Windows retest guide](docs/windows-retest.md) to connect this facade on port 3791 to the existing service on port 3790. The submodule is a source pin, not a second service installation.
 
 Operator configuration must also follow the [worker execution and workspace policy](docs/worker-policy.md).
+
+## Brand-new assistant: natural-language task delegation
+
+**One-time operator prerequisite:** configure a dedicated authorized general-work Fleet alias (for example `general-work`) and set `AWG_GENERAL_PROJECT=general-work` before starting this wrapper; **or** configure exactly one host's verified upstream scratch `hosts[].defaultProject`. This gateway does not invent a T3 project, and will refuse unrelated work if only `pilot` is available. The upstream bearer client must have Operate access to the selected destination.
+
+After that, give a **new, empty-context assistant only the MCP connection to port 3791**, then simply say something like "幫我製作一個行銷成效追蹤工具，包含可讀的成果". It should discover `worker_task_plan` and `worker_task_start` from MCP, create a fresh upstream job, return its ID, read progress through `work_status` and `work_messages`, and continue the same ID if you ask for improvements. No separate direct 3790/3773 MCP connections or repo Skill installation are required for this v0.2 experiment.
+
+See the [zero-context assistant acceptance guide](docs/agent-zero-context-test.md) for exact pass/fail criteria, missing-config behavior, and a separate unrelated follow-up task. A generic destination is a **worker execution workspace**, not a company-level Project or Card.
 
 ## Agent routing skill
 
