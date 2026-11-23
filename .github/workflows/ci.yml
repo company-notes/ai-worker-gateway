@@ -19,6 +19,10 @@ jobs:
         with:
           node-version: '22'
       - run: npm run check
+      - name: Windows PowerShell 5.1 bootstrap checks
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\windows\Test-WindowsBootstrap.ps1
       - name: Confirm upstream remains a gitlink
         shell: bash
         run: |
