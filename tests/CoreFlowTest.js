@@ -394,3 +394,25 @@ test('parallel calls ensure only one T3 project, even without prior assistant co
     assert.equal(environment.provisioningCalls.length, before + 1,
         'Two concurrent assistants must not register duplicate T3 Projects');
 });
+
+test('new assistant selects an advertised Fleet model for a new project without a global model default', async () => {
+    const previous = environment.gateway.provision.config.provisionModelSelection;
+    environment.gateway.provision.config.provisionModelSelection = null;
+    try {
+        const selected = { instanceId: 'approved-model-instance', model: 'approved-model' };
+        const result = await environment.client.request('tools/call', {
+            name: 'worker_workspace_ensure',
+            arguments: {
+                name: 'self-service-analytics',
+                requestId: 'self-service-analytics-1',
+                modelSelection: selected,
+            },
+        });
+        assert.notEqual(result.body.result.isError, true,
+            'The Session Router should be able to use a Fleet-advertised model without changing installer settings');
+        assert.equal(result.body.result.structuredContent.dispatchReady, true);
+        assert.deepEqual(result.body.result.structuredContent.modelSelection, selected);
+    } finally {
+        environment.gateway.provision.config.provisionModelSelection = previous;
+    }
+});
