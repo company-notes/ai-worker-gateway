@@ -16,6 +16,8 @@ An independent, **local-only experimental MCP facade** that extends the original
 
 See [`.env.example`](.env.example) for names and [docs/architecture.md](docs/architecture.md) for the security contract and upstream update procedure.
 
+Operator configuration must also follow the [worker execution and workspace policy](docs/worker-policy.md).
+
 ## Agent routing skill
 
 An optional [Gateway-neutral Session Router Skill](.agents/skills/session-router/SKILL.md) documents when to find, start, or continue jobs and explains why preparing a folder is not yet T3 Project registration. Each AI client still needs its own explicit MCP access.
