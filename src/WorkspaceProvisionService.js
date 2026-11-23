@@ -47,16 +47,19 @@ export class WorkspaceProvisionService {
             Object.keys(args).some((key) => !['name', 'title', 'requestId', 'modelSelection'].includes(key))) {
             throw new Error('Expected only name, optional title and requestId');
         }
+
         if (typeof args.name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(args.name)) {
             throw new Error('Workspace name must be a lowercase slug of 1-63 letters, digits or hyphens');
         }
         if (typeof args.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(args.requestId)) {
             throw new Error('requestId must be 1-128 letters, digits, dots, underscores, colons or hyphens');
         }
+
         if (args.title !== undefined && (typeof args.title !== 'string' || !args.title.trim() ||
             args.title.length > 120 || /[\r\n]/.test(args.title))) {
             throw new Error('Title must be a nonempty single line, at most 120 characters');
         }
+
         if (args.modelSelection !== undefined) {
             ModelSelectionPolicy.validate(args.modelSelection);
             if (this.config.provisionModelSelection !== null) {
@@ -160,6 +163,7 @@ export class WorkspaceProvisionService {
             if (seen.has(cursor)) {
                 throw new Error('Fleet project catalog repeated a page cursor');
             }
+
             seen.add(cursor);
         }
 
@@ -180,6 +184,7 @@ export class WorkspaceProvisionService {
         if (!status.isFile() || status.isSymbolicLink()) {
             throw new Error('Workspace registration marker is not a regular file');
         }
+
         const data = JSON.parse(await fileSystem.readFile(markerPath, 'utf8'));
         if (data.workspace_name !== name || data.host_id !== this.config.provisionHost ||
             typeof data.project_id !== 'string' || !/^[0-9a-z-]{8,100}$/i.test(data.project_id) ||
