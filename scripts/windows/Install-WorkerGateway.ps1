@@ -70,7 +70,7 @@ function Get-ClearText([Security.SecureString]$secret) {
     }
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'src\main.js')) -PathType Leaf) {
+if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'src\main.js') -PathType Leaf)) {
     throw 'AI Worker Gateway source is missing. Run the installer from a complete repository checkout.'
 }
 if (-not (Test-Path -LiteralPath $sourceSkill -PathType Leaf)) {
