@@ -71,6 +71,7 @@ export class WorkspaceService {
                 }
             }
         }
+
         await this._inspectWorkspace(workspacePath);
 
         return {

@@ -94,6 +94,7 @@ export class WorkerGateway {
         if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length !== 1) {
             return this._toolResult(payload.id, 'Expected exactly one name argument', true);
         }
+
         try {
             const value = name === 'worker_workspace_plan'
                 ? await this.workspaces.plan(args.name)
@@ -110,6 +111,7 @@ export class WorkerGateway {
         if (payload.method === 'tools/call' && extensionNames.has(payload.params?.name)) {
             return { status: 200, body: JSON.stringify(await this._handleExtension(payload)), contentType: 'application/json' };
         }
+
         const upstreamResponse = await this.upstream.forward(payload, protocolVersion);
         if (payload.method !== 'tools/list' || upstreamResponse.status !== 200) {
             return upstreamResponse;
@@ -140,6 +142,7 @@ export class WorkerGateway {
             this._sendJSON(response, 401, { error: 'Authentication required' });
             return;
         }
+
         const pathname = new URL(request.url, 'http://localhost').pathname;
         if (pathname === '/healthz' && request.method === 'GET') {
             this._sendJSON(response, 200, { healthy: true, upstreamChecked: false });
