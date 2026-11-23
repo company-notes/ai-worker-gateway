@@ -8,6 +8,6 @@
   "scripts": {
     "start": "node src/main.js",
     "test": "node --test tests/*Test.js",
-    "check": "node --check src/main.js && node --check src/WorkerGateway.js && node --check src/UpstreamMCPClient.js && node --check src/WorkspaceService.js && node --check src/WorkerConfig.js && node --check src/TaskDispatchService.js && node --check src/WorkspaceProvisionService.js && node --check src/T3ProjectAdapter.js && node --check src/GitWorkspaceBootstrapper.js && npm test"
+    "check": "node --check src/main.js && node --check src/WorkerGateway.js && node --check src/UpstreamMCPClient.js && node --check src/WorkspaceService.js && node --check src/WorkerConfig.js && node --check src/TaskDispatchService.js && node --check src/WorkspaceProvisionService.js && node --check src/T3ProjectAdapter.js && node --check src/GitWorkspaceBootstrapper.js && node --check src/ModelSelectionPolicy.js && npm test"
   }
 }

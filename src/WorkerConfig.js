@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { ModelSelectionPolicy } from './ModelSelectionPolicy.js';
 
 export class WorkerConfig {
     static fromEnvironment(environment = process.env) {
@@ -47,28 +48,7 @@ export class WorkerConfig {
             throw new Error('AWG_PROVISION_HOST requires an existing AWG_WORKSPACE_ROOT');
         }
 
-        let provisionModelSelection = null;
-        if (selectionJSON !== null) {
-            if (selectionJSON.length > 4096) {
-                throw new Error('AWG_PROVISION_MODEL_SELECTION is too long');
-            }
-
-            try {
-                provisionModelSelection = JSON.parse(selectionJSON);
-            } catch {
-                throw new Error('AWG_PROVISION_MODEL_SELECTION must be valid JSON');
-            }
-            if (provisionModelSelection === null || typeof provisionModelSelection !== 'object' ||
-                Array.isArray(provisionModelSelection) ||
-                typeof provisionModelSelection.instanceId !== 'string' || !provisionModelSelection.instanceId ||
-                typeof provisionModelSelection.model !== 'string' || !provisionModelSelection.model ||
-                Object.keys(provisionModelSelection).some((key) => !['instanceId', 'model', 'options'].includes(key)) ||
-                (provisionModelSelection.options !== undefined &&
-                    (typeof provisionModelSelection.options !== 'object' || provisionModelSelection.options === null ||
-                        Array.isArray(provisionModelSelection.options)))) {
-                throw new Error('AWG_PROVISION_MODEL_SELECTION must contain an instanceId, model and optional options');
-            }
-        }
+        const provisionModelSelection = selectionJSON === null ? null : ModelSelectionPolicy.fromJSON(selectionJSON);
 
         if (workspaceRoot !== null && workspaceRoot.trim() === '') {
             throw new Error('AWG_WORKSPACE_ROOT cannot be empty');

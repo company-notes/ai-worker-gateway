@@ -1,6 +1,7 @@
 import { promises as fileSystem } from 'node:fs';
 import path from 'node:path';
 import { GitWorkspaceBootstrapper } from './GitWorkspaceBootstrapper.js';
+import { ModelSelectionPolicy } from './ModelSelectionPolicy.js';
 import { T3ProjectAdapter } from './T3ProjectAdapter.js';
 
 export class WorkspaceProvisionService {
@@ -23,6 +24,17 @@ export class WorkspaceProvisionService {
                     name: { type: 'string', description: 'Unique lowercase project slug; 1-63 lowercase letters, digits and hyphens.' },
                     title: { type: 'string', description: 'Optional human-readable display title; defaults to the workspace slug.' },
                     requestId: { type: 'string', description: 'Stable idempotency key for this provisioning request; reuse when retrying.' },
+                    modelSelection: {
+                        type: 'object',
+                        description: 'Optional exact authorized model from fleet_models if no operator-fixed model is configured.',
+                        properties: {
+                            instanceId: { type: 'string' },
+                            model: { type: 'string' },
+                            options: { type: 'object', additionalProperties: { anyOf: [{ type: 'string' }, { type: 'boolean' }] } },
+                        },
+                        required: ['instanceId', 'model'],
+                        additionalProperties: false,
+                    },
                 },
                 required: ['name', 'requestId'],
                 additionalProperties: false,
@@ -32,7 +44,7 @@ export class WorkspaceProvisionService {
 
     _validate(args) {
         if (!args || typeof args !== 'object' || Array.isArray(args) ||
-            Object.keys(args).some((key) => !['name', 'title', 'requestId'].includes(key))) {
+            Object.keys(args).some((key) => !['name', 'title', 'requestId', 'modelSelection'].includes(key))) {
             throw new Error('Expected only name, optional title and requestId');
         }
         if (typeof args.name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(args.name)) {
@@ -44,6 +56,12 @@ export class WorkspaceProvisionService {
         if (args.title !== undefined && (typeof args.title !== 'string' || !args.title.trim() ||
             args.title.length > 120 || /[\r\n]/.test(args.title))) {
             throw new Error('Title must be a nonempty single line, at most 120 characters');
+        }
+        if (args.modelSelection !== undefined) {
+            ModelSelectionPolicy.validate(args.modelSelection);
+            if (this.config.provisionModelSelection !== null) {
+                throw new Error('An operator-fixed model is configured. Do not override it in a provisioning request');
+            }
         }
     }
 
@@ -71,8 +89,7 @@ export class WorkspaceProvisionService {
         return host;
     }
 
-    async _verifyModelSelection() {
-        const selected = this.config.provisionModelSelection;
+    async _verifyModelSelection(selected) {
         if (!selected) {
             return;
         }
@@ -183,7 +200,8 @@ export class WorkspaceProvisionService {
 
     async _ensure(args) {
         await this._assertHostAuthorized();
-        await this._verifyModelSelection();
+        const modelSelection = this.config.provisionModelSelection ?? args.modelSelection ?? null;
+        await this._verifyModelSelection(modelSelection);
 
         const workspacePath = await this.workspaces.pathFor(args.name);
         const existingMarker = await this._readMarker(workspacePath, args.name);
@@ -207,9 +225,8 @@ export class WorkspaceProvisionService {
             throw new Error('T3 project exists but the Fleet client cannot verify an allowed dispatch target. Grant this project to the wrapper client and enable host discovery; no job has been dispatched');
         }
 
-        const modelSelection = this.config.provisionModelSelection ?? null;
         if (!project.launch.defaultModelSource && !modelSelection) {
-            throw new Error('Registered project is visible but lacks a launch model. Operator: set AWG_PROVISION_MODEL_SELECTION from the authorized fleet_models catalog');
+            throw new Error('Registered project is visible but lacks a launch model. Session Router: select modelSelection from fleet_models and retry, or operator: set AWG_PROVISION_MODEL_SELECTION');
         }
 
         return {
