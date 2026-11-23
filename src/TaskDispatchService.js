@@ -24,7 +24,7 @@ export class TaskDispatchService {
         return [
             {
                 name: 'worker_task_plan',
-                description: 'START HERE for a NEW USER TASK when you have no previous chat context. Read-only. Inspects live authorized Fleet destinations and decides whether this request has a safe route. Named projects must match exactly; otherwise uses the operator-selected general workspace or one configured host scratch. Never guesses, creates projects, or reuses unrelated Pilot jobs. If blocked, reports the missing one-time operator configuration.',
+                description: 'START HERE for a NEW USER TASK when you have no previous chat context. Read-only. Inspects live authorized Fleet destinations and decides whether this request has a safe route. Named projects must match exactly; otherwise uses the operator-selected general workspace or one configured host scratch. Never guesses, creates projects, or reuses unrelated Pilot jobs. If no existing destination is authorized, inspect worker_workspace_ensure (if enabled) to provision a dedicated local workspace; do not automatically reuse Pilot.',
                 inputSchema: {
                     type: 'object',
                     properties,
@@ -34,7 +34,7 @@ export class TaskDispatchService {
             },
             {
                 name: 'worker_task_start',
-                description: 'For a new, independent natural-language task, route it safely and create a fresh T3 Fleet Job through the ORIGINAL upstream work_start. Works without past conversation or manual project selection WHEN an authorized general-purpose workspace or single default scratch destination is configured. Never uses an unrelated Pilot project implicitly. Pass a unique requestId per new task; on uncertain errors retry with the SAME ID AND SAME INPUT, not a second job. After creation use work_status/work_messages; for follow-ups find the correct job with work_list and use work_continue, NOT this tool.',
+                description: 'For a new, independent natural-language task, route it safely and create a fresh T3 Fleet Job through the ORIGINAL upstream work_start. Works without past conversation WHEN an authorized general-purpose workspace or one default scratch destination is configured. For an unrelated task requiring a NEW workspace, the Session Router first uses worker_workspace_ensure then the official work_start with its returned target. Never uses an unrelated Pilot project implicitly. Pass a unique requestId per new task; on uncertain errors retry with the SAME ID AND SAME INPUT, not a second job. After creation use work_status/work_messages; for follow-ups find the correct job with work_list and use work_continue, NOT this tool.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -142,7 +142,7 @@ export class TaskDispatchService {
         }
 
         return this._blocked(
-            'No authorized general-purpose destination exists. Operator: configure AWG_GENERAL_PROJECT to an existing dedicated general-work Fleet alias, OR configure one verified upstream hosts[].defaultProject scratch alias. Do not use pilot as an implicit fallback.',
+            'No authorized existing general-purpose destination. The Session Router may create a NEW isolated workspace with worker_workspace_ensure when explicitly enabled by the operator, then use official work_start. Otherwise configure AWG_GENERAL_PROJECT or one verified upstream scratch default. Never use pilot as an implicit fallback.',
             status,
         );
     }
