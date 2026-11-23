@@ -32,6 +32,9 @@ class GatewayTestEnvironment {
         this.root = await mkdtemp(path.join(os.tmpdir(), 'awg-test-'));
         this.calls = [];
         this.scratchEnabled = false;
+        this.provisionedProjects = [];
+        this.provisioningCalls = [];
+        this.hideProvisionedProjects = false;
         this.upstream = createServer(async (request, response) => {
             const chunks = [];
             for await (const chunk of request) {
@@ -41,7 +44,8 @@ class GatewayTestEnvironment {
             this.calls.push({ authorization: request.headers.authorization, payload });
 
             const status = {
-                hosts: [{ id: 'my-pc', defaultProject: this.scratchEnabled ? 'general-scratch' : null }],
+                hosts: [{ id: 'my-pc', defaultProject: this.scratchEnabled ? 'general-scratch' : null, reachable: true,
+                    discovery: { enabled: true, allowWorkStart: true } }],
                 projects: [
                     { alias: 'pilot', description: 'Original Fleet pilot: not for general work', host: 'my-pc', workspaceMode: 'worktree', allowWorkStart: true },
                     ...(this.scratchEnabled
@@ -49,10 +53,18 @@ class GatewayTestEnvironment {
                         : []),
                 ],
             };
+            const projectsCatalog = {
+                hosts: [{ host: 'my-pc', available: true, discovery: true, projects: this.hideProvisionedProjects ? [] : this.provisionedProjects.map((project) => ({
+                    projectId: project.projectId, name: project.title,
+                    launch: { allowed: true, alias: null, defaultModelSource: null },
+                })) }],
+            };
             const result = payload.method === 'tools/list'
                 ? { tools: ['work_start', 'work_status', 'work_continue'].map((name) => ({ name, inputSchema: { type: 'object' } })) }
                 : payload.method === 'tools/call' && payload.params.name === 'fleet_status'
                     ? { content: [{ type: 'text', text: JSON.stringify(status) }], structuredContent: status }
+                    : payload.method === 'tools/call' && payload.params.name === 'fleet_projects'
+                        ? { content: [{ type: 'text', text: JSON.stringify(projectsCatalog) }], structuredContent: projectsCatalog }
                     : payload.method === 'tools/call'
                         ? {
                             content: [{ type: 'text', text: payload.params.name === 'work_start' ? 'job-123' : payload.params.name === 'work_status' ? 'running:job-123' : 'continued:job-123' }],
@@ -72,8 +84,19 @@ class GatewayTestEnvironment {
             AWG_UPSTREAM_MCP_URL: `http://127.0.0.1:${upstreamPort}/mcp`,
             AWG_LISTEN_PORT: '0',
             AWG_WORKSPACE_ROOT: this.root,
+            AWG_PROVISION_HOST: 'my-pc',
+            AWG_PROVISION_MODEL_SELECTION: JSON.stringify({ instanceId: 'approved-model-instance', model: 'approved-model' }),
         });
-        this.gateway = new WorkerGateway(config);
+        this.gateway = new WorkerGateway(config, {
+            projectAdapter: {
+                register: async (workspacePath, title) => {
+                    const project = { workspacePath, title, projectId: 't3-registered-' + this.provisionedProjects.length };
+                    this.provisioningCalls.push(project);
+                    this.provisionedProjects.push(project);
+                    return project.projectId;
+                },
+            },
+        });
         const address = await this.gateway.listen();
         this.client = new MCPTestClient(`http://127.0.0.1:${address.port}/mcp`, config.clientToken);
     }
@@ -249,5 +272,76 @@ test('operator-selected general project routes arbitrary tasks without needing s
             'Operator-selected alias must be forwarded, not silently converted to scratch');
     } finally {
         environment.gateway.taskDispatch.generalProject = null;
+    }
+});
+
+test('new assistant provisions an isolated marketing workspace, starts a new job, then continues that job', async () => {
+    const task = '替全新產品製作行銷成效追蹤工具，包含廣告費、轉換率、ROAS 與使用說明';
+    const toolList = await environment.client.request('tools/list');
+    assert.ok(toolList.body.result.tools.some((tool) => tool.name === 'worker_workspace_ensure'),
+        'A no-history assistant must discover the provisioning capability through MCP');
+
+    const created = await environment.client.request('tools/call', {
+        name: 'worker_workspace_ensure',
+        arguments: { name: 'marketing-tracker', title: 'Marketing Tracker', requestId: 'marketing-provision-1' },
+    });
+    assert.equal(created.body.result.isError, false, 'Provisioning must succeed with an authorized local test host');
+    const provisioned = created.body.result.structuredContent;
+    assert.equal(provisioned.dispatchReady, true, 'Real project registration and Fleet launch permission are required');
+    assert.deepEqual(provisioned.target, { host: 'my-pc', projectId: 't3-registered-0' });
+    assert.deepEqual(provisioned.modelSelection, { instanceId: 'approved-model-instance', model: 'approved-model' });
+
+    const started = await environment.client.request('tools/call', {
+        name: 'work_start',
+        arguments: {
+            target: provisioned.target, modelSelection: provisioned.modelSelection, task,
+            requestId: 'marketing-work-1',
+        },
+    });
+    assert.equal(started.body.result.structuredContent.job.jobId, 'job-123');
+    const dispatched = environment.calls.filter((call) =>
+        call.payload.method === 'tools/call' && call.payload.params.name === 'work_start').at(-1);
+    assert.equal(dispatched.payload.params.arguments.target.projectId, 't3-registered-0',
+        'The marketing task must never silently go to the unrelated Pilot alias');
+
+    const status = await environment.client.request('tools/call', {
+        name: 'work_status', arguments: { jobId: 'job-123' },
+    });
+    assert.equal(status.body.result.content[0].text, 'running:job-123');
+
+    const continued = await environment.client.request('tools/call', {
+        name: 'work_continue', arguments: { jobId: 'job-123', message: '再加 CSV 匯出', requestId: 'marketing-followup-1' },
+    });
+    assert.equal(continued.body.result.content[0].text, 'continued:job-123');
+
+    const repeated = await environment.client.request('tools/call', {
+        name: 'worker_workspace_ensure',
+        arguments: { name: 'marketing-tracker', title: 'Marketing Tracker', requestId: 'marketing-provision-1' },
+    });
+    assert.equal(repeated.body.result.structuredContent.target.projectId, 't3-registered-0');
+    assert.equal(environment.provisioningCalls.length, 1, 'A retry must not register the project twice');
+});
+
+test('unauthorized or unverified provisioning cannot dispatch a new project', async () => {
+    const outside = await environment.client.request('tools/call', {
+        name: 'worker_workspace_ensure',
+        arguments: { name: '../outside', requestId: 'denied-outside' },
+    });
+    assert.equal(outside.body.result.isError, true, 'Traversal must be refused before filesystem or T3 actions');
+
+    environment.hideProvisionedProjects = true;
+    try {
+        const result = await environment.client.request('tools/call', {
+            name: 'worker_workspace_ensure',
+            arguments: { name: 'restricted-marketing', requestId: 'restricted-new-work' },
+        });
+        assert.equal(result.body.result.isError, true,
+            'If a Fleet token restricts access to Pilot, a freshly registered project must not claim dispatch readiness');
+        const last = environment.calls.filter((call) =>
+            call.payload.method === 'tools/call' && call.payload.params.name === 'work_start').at(-1);
+        assert.notEqual(last?.payload.params.arguments?.target?.projectId, 't3-registered-1',
+            'No unverified target may reach work_start');
+    } finally {
+        environment.hideProvisionedProjects = false;
     }
 });
