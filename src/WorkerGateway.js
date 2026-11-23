@@ -2,12 +2,14 @@ import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { UpstreamMCPClient } from './UpstreamMCPClient.js';
 import { WorkspaceService } from './WorkspaceService.js';
+import { TaskDispatchService } from './TaskDispatchService.js';
 
 export class WorkerGateway {
     constructor(config) {
         this.config = config;
         this.upstream = new UpstreamMCPClient(config.upstreamURL, config.upstreamToken);
         this.workspaces = new WorkspaceService(config.workspaceRoot);
+        this.taskDispatch = new TaskDispatchService(this.upstream, config.generalProject);
         this.server = createServer((request, response) => {
             this._handleRequest(request, response).catch((error) => {
                 console.error('Worker Gateway request failed:', error.message);
@@ -55,6 +57,7 @@ export class WorkerGateway {
 
     _extensionTools() {
         return [
+            ...this.taskDispatch.getTools(),
             {
                 name: 'worker_workspace_plan',
                 description: 'Inspect an approved local workspace slug without modifying files. It does not create a T3 Project.',
@@ -109,10 +112,29 @@ export class WorkerGateway {
     async _handleMCP(payload, protocolVersion) {
         const extensionNames = new Set(this._extensionTools().map((tool) => tool.name));
         if (payload.method === 'tools/call' && extensionNames.has(payload.params?.name)) {
+            if (this.taskDispatch.handles(payload.params.name)) {
+                try {
+                    const result = await this.taskDispatch.run(payload.params.name, payload.params.arguments);
+                    return { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: payload.id, result }), contentType: 'application/json' };
+                } catch (error) {
+                    return { status: 200, body: JSON.stringify(this._toolResult(payload.id, error.message, true)), contentType: 'application/json' };
+                }
+            }
+
             return { status: 200, body: JSON.stringify(await this._handleExtension(payload)), contentType: 'application/json' };
         }
 
         const upstreamResponse = await this.upstream.forward(payload, protocolVersion);
+        if (payload.method === 'initialize' && upstreamResponse.status === 200 &&
+            upstreamResponse.contentType.includes('application/json')) {
+            const message = JSON.parse(upstreamResponse.body);
+            if (message.result && typeof message.result === 'object') {
+                const guide = 'For any new natural-language work request, call worker_task_plan then worker_task_start with a new requestId. Do not reuse an unrelated project or old job. For follow-ups inspect work_list and use work_continue on the confirmed jobId. If task planning reports no authorized general-purpose destination, tell the operator to configure one; do not pretend the folder preparation tools register a project.';
+                message.result.instructions = [message.result.instructions, guide].filter(Boolean).join('\n\n');
+                return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
+            }
+        }
+
         if (payload.method !== 'tools/list' || upstreamResponse.status !== 200) {
             return upstreamResponse;
         }

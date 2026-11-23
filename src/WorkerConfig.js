@@ -8,6 +8,7 @@ export class WorkerConfig {
         const clientToken = environment.AWG_CLIENT_TOKEN;
         const upstreamToken = environment.AWG_UPSTREAM_TOKEN;
         const workspaceRoot = environment.AWG_WORKSPACE_ROOT ?? null;
+        const generalProject = environment.AWG_GENERAL_PROJECT ?? null;
 
         if (listenHost !== '127.0.0.1' && listenHost !== '::1') {
             throw new Error('AWG_LISTEN_HOST must be loopback; public access is not supported');
@@ -34,6 +35,9 @@ export class WorkerConfig {
         if (clientToken === upstreamToken) {
             throw new Error('Client and upstream tokens must be different');
         }
+        if (generalProject !== null && !/^[a-zA-Z0-9._-]{1,64}$/.test(generalProject)) {
+            throw new Error('AWG_GENERAL_PROJECT must be an exact existing Fleet project alias');
+        }
         if (workspaceRoot !== null && workspaceRoot.trim() === '') {
             throw new Error('AWG_WORKSPACE_ROOT cannot be empty');
         }
@@ -48,6 +52,7 @@ export class WorkerConfig {
             clientToken,
             upstreamToken,
             workspaceRoot,
+            generalProject,
         });
     }
 
