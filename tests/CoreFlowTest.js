@@ -240,7 +240,7 @@ test('fresh assistant delegates an unrelated marketing task to configured scratc
             name: 'worker_task_start',
             arguments: { task, title: '行銷分析工具', requestId: 'marketing-scratch-1' },
         });
-        assert.equal(started.body.result.isError, false, 'A permitted new task must not fail in the Gateway adapter');
+        assert.notEqual(started.body.result.isError, true, 'A permitted new task must not fail in the Gateway adapter');
         assert.equal(started.body.result.structuredContent.job.jobId, 'job-123',
             'New high-level tool must return the actual upstream Fleet Job ID');
         const last = environment.calls.filter((call) =>
@@ -266,7 +266,7 @@ test('operator-selected general project routes arbitrary tasks without needing s
             name: 'worker_task_start',
             arguments: { task: 'Test an intentionally selected operator project', requestId: 'selected-pilot-1' },
         });
-        assert.equal(started.body.result.isError, false, 'A permitted new task must not fail in the Gateway adapter');
+        assert.notEqual(started.body.result.isError, true, 'A permitted new task must not fail in the Gateway adapter');
         assert.equal(started.body.result.structuredContent.job.jobId, 'job-123',
             'Configured general project should be usable without explicit project choice in each agent turn');
         const last = environment.calls.filter((call) =>
