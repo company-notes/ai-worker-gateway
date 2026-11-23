@@ -182,19 +182,21 @@ export class WorkspaceProvisionService {
         }
         const data = JSON.parse(await fileSystem.readFile(markerPath, 'utf8'));
         if (data.workspace_name !== name || data.host_id !== this.config.provisionHost ||
-            typeof data.project_id !== 'string' || !/^[0-9a-z-]{8,100}$/i.test(data.project_id)) {
+            typeof data.project_id !== 'string' || !/^[0-9a-z-]{8,100}$/i.test(data.project_id) ||
+            typeof data.project_title !== 'string' || !data.project_title.trim()) {
             throw new Error('Workspace registration marker does not match this authorized host and name');
         }
 
-        return data.project_id;
+        return { projectId: data.project_id, title: data.project_title };
     }
 
-    async _saveMarker(workspacePath, name, projectId) {
+    async _saveMarker(workspacePath, name, projectId, title) {
         const markerPath = path.join(workspacePath, '.awg-provision.json');
         await fileSystem.writeFile(markerPath, JSON.stringify({
             workspace_name: name,
             host_id: this.config.provisionHost,
             project_id: projectId,
+            project_title: title,
         }) + '\n', { flag: 'wx', mode: 0o600 });
     }
 
@@ -205,23 +207,26 @@ export class WorkspaceProvisionService {
 
         const workspacePath = await this.workspaces.pathFor(args.name);
         const existingMarker = await this._readMarker(workspacePath, args.name);
-        let projectId = existingMarker;
+        const title = args.title?.trim() ?? existingMarker?.title ?? 'AWG-' + args.name;
+        if (existingMarker && args.title && existingMarker.title !== title) {
+            throw new Error('Workspace already has a different registered title; do not rename on an idempotent retry');
+        }
 
+        let projectId = existingMarker?.projectId ?? null;
         if (!projectId) {
             const result = await this.workspaces.plan(args.name);
             if (result.exists) {
                 throw new Error('Workspace exists without a trusted registration marker; operator must reconcile it before retrying');
             }
 
-            const title = 'AWG-' + args.name;
             await this.workspaces.prepare(args.name);
             await this.bootstrapper.initialize(workspacePath, title);
             projectId = await this.projectAdapter.register(workspacePath, title);
-            await this._saveMarker(workspacePath, args.name, projectId);
+            await this._saveMarker(workspacePath, args.name, projectId, title);
         }
 
         const project = await this._findProject(projectId);
-        if (!project || project.launch?.allowed !== true || project.name !== 'AWG-' + args.name) {
+        if (!project || project.launch?.allowed !== true || project.name !== title) {
             throw new Error('T3 project exists but the Fleet client cannot verify an allowed dispatch target. Grant this project to the wrapper client and enable host discovery; no job has been dispatched');
         }
 
@@ -231,6 +236,7 @@ export class WorkspaceProvisionService {
 
         return {
             workspaceName: args.name,
+            projectTitle: title,
             host: this.config.provisionHost,
             target: { host: this.config.provisionHost, projectId },
             modelSelection,
