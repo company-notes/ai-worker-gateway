@@ -71,6 +71,53 @@ export class WorkspaceProvisionService {
         return host;
     }
 
+    async _verifyModelSelection() {
+        const selected = this.config.provisionModelSelection;
+        if (!selected) {
+            return;
+        }
+
+        let cursor = null;
+        const seen = new Set();
+        for (let page = 0; page < 32; page++) {
+            const args = cursor
+                ? { host: this.config.provisionHost, cursor, search: selected.model }
+                : { host: this.config.provisionHost, refresh: true, search: selected.model };
+            const response = await this.upstream.callTool('fleet_models', args);
+            const hostCatalog = response.structuredContent?.hosts?.find((host) => host.host === this.config.provisionHost);
+            if (!hostCatalog || hostCatalog.available !== true || !Array.isArray(hostCatalog.models)) {
+                throw new Error('Fleet model catalog is unavailable for the authorized host');
+            }
+
+            const model = hostCatalog.models.find((candidate) =>
+                candidate.providerInstanceId === selected.instanceId && candidate.modelId === selected.model);
+            if (model) {
+                const supportedOptions = new Map((model.options ?? []).map((option) => [option.id, option]));
+                for (const [optionId, value] of Object.entries(selected.options ?? {})) {
+                    const option = supportedOptions.get(optionId);
+                    const allowed = option?.type === 'boolean'
+                        ? typeof value === 'boolean'
+                        : option?.type === 'select' && option.choices?.some((choice) => choice.id === value);
+                    if (!allowed) {
+                        throw new Error('Provisioning model option is not advertised by the authorized Fleet host: ' + optionId);
+                    }
+                }
+
+                return;
+            }
+            cursor = hostCatalog.nextCursor ?? null;
+            if (!cursor) {
+                throw new Error('Provisioning model is not advertised by the authorized Fleet host');
+            }
+            if (seen.has(cursor)) {
+                throw new Error('Fleet model catalog repeated a page cursor');
+            }
+            seen.add(cursor);
+        }
+
+        throw new Error('Fleet model catalog exceeds the verification page limit');
+    }
+
     async _findProject(projectId) {
         let cursor = null;
         const seen = new Set();
@@ -136,6 +183,8 @@ export class WorkspaceProvisionService {
 
     async _ensure(args) {
         await this._assertHostAuthorized();
+        await this._verifyModelSelection();
+
         const workspacePath = await this.workspaces.pathFor(args.name);
         const existingMarker = await this._readMarker(workspacePath, args.name);
         let projectId = existingMarker;
