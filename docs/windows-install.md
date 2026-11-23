@@ -22,7 +22,7 @@
     npm run check
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Install-WorkerGateway.ps1
 
-安裝器會安全提示輸入你已產生的 Fleet Client Bearer Token（不是 T3 Pairing Credential）。若已有本機受保護的明文 Token 暫存檔，可選擇以 -UpstreamTokenFile 參數傳入其路徑，但安裝器不會自動刪掉原檔；驗證新服務正常後請自行清理。
+安裝器會安全提示輸入你已產生的 Fleet Client Bearer Token（不是 T3 Pairing Credential）。 在這個原版 Token 的有效期與權限內運行；過期或權限不足會被 Fleet 拒絕，不會自動升權。若已有本機受保護的明文 Token 暫存檔，可選擇以 -UpstreamTokenFile 參數傳入其路徑，但安裝器不會自動刪掉原檔；驗證新服務正常後請自行清理。
 
 原版 Fleet Token 必須授權實際執行目的地。只允許 Pilot 的 Token，不能當作一般行銷專案的通用權限。
 
@@ -34,7 +34,7 @@
 
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Install-WorkerGateway.ps1 -EnableProvisioning -ProvisionHost my-pc -ProvisionModelInstance "<fleet_models 的 providerInstanceId>" -ProvisionModel "<fleet_models 的 modelId>"
 
-這會在目前 Windows 帳號的 `%LOCALAPPDATA%\AIWorkerGateway\workspaces` 下啟用專屬 Git 工作區根目錄、預設使用官方 `t3 project add` 註冊，然後再用 Fleet 的 `fleet_projects` 確認可派工；**不修改原版 Fleet Gateway 的原始碼或資料庫**。如已自行準備其他專用根目錄，可另加 `-WorkspaceRoot "已存在目錄"`。沒有合適預設模型時，`-ProvisionModelInstance` 與 `-ProvisionModel` 需引用實際 `fleet_models` 列出的模型，不能猜測。
+這會在目前 Windows 帳號的 `%LOCALAPPDATA%\AIWorkerGateway\workspaces` 下啟用專屬 Git 工作區根目錄、預設使用官方 `t3 project add` 註冊，然後再用 Fleet 的 `fleet_projects` 確認可派工；**不修改原版 Fleet Gateway 的原始碼或資料庫**。如已自行準備其他專用根目錄，可另加 `-WorkspaceRoot "已存在目錄"`。`-ProvisionModelInstance` 和 `-ProvisionModel` 是**可選**的管理員模型鎖定政策，兩者必須引用實際 `fleet_models` 所列的值。如果沒鎖定模型，Session Router 可以先查詢 `fleet_models`，把選定且驗證過的 `modelSelection` 隨 `worker_workspace_ensure` 傳入；這不需要每次修改安裝設定。若連一個合法模型都找不到，Gateway 必須拒絕執行。
 
 **重要：原本 `omb-pilot-test` 的 Operate Token 只授權 Pilot。** 它足以驗證已存在的 Pilot，但即使 T3 成功建立新專案，這把 Token 也不能看到或派工到新專案。要完成新專案派工，操作者須另行批准適用於這台測試 Host／新專案的 Fleet Client 權限；測試時使用隔離帳號、不要直接把廣泛權限提供給所有共用 3791 的助理。安裝器不會自行提升舊權限。
 
