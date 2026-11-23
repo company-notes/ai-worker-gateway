@@ -65,19 +65,23 @@ export class TaskDispatchService {
         const allowed = name === 'worker_task_start'
             ? new Set(['task', 'project', 'host', 'requestId', 'title'])
             : new Set(['task', 'project', 'host']);
+
         for (const key of Object.keys(args)) {
             if (!allowed.has(key)) {
                 throw new Error('Unsupported argument: ' + key);
             }
         }
+
         if (typeof args.task !== 'string' || !args.task.trim() || args.task.length > 20_000) {
             throw new Error('task must contain 1–20000 characters');
         }
+
         for (const key of ['project', 'host', 'title']) {
             if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) {
                 throw new Error(key + ' must be a nonempty string');
             }
         }
+
         if (name === 'worker_task_start' &&
             (typeof args.requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(args.requestId))) {
             throw new Error('requestId is required and must be 1–128 letters, digits, dots, underscores, colons or hyphens');
@@ -91,9 +95,11 @@ export class TaskDispatchService {
             method: 'tools/call',
             params: { name, arguments: args },
         });
+
         if (response.status !== 200 || !response.contentType.includes('application/json')) {
             throw new Error('Upstream Fleet tool unavailable (HTTP ' + response.status + ')');
         }
+
         const message = JSON.parse(response.body);
         if (message.error) {
             throw new Error('Upstream ' + name + ' rejected the request: ' + (message.error.message ?? 'unknown error'));
@@ -110,6 +116,7 @@ export class TaskDispatchService {
         if (response.isError) {
             throw new Error('Cannot inspect authorized Fleet destinations: ' + response.content.map((part) => part.text ?? '').join(' '));
         }
+
         const status = response.structuredContent;
         if (!status || !Array.isArray(status.hosts) || !Array.isArray(status.projects)) {
             throw new Error('fleet_status did not return its expected structured host/project catalog');
@@ -149,6 +156,7 @@ export class TaskDispatchService {
             status.projects.some((project) =>
                 project.alias === host.defaultProject && project.host === host.id &&
                 project.workspaceMode === 'scratch' && project.allowWorkStart === true));
+
         if (hosts.length === 1) {
             return {
                 ready: true,
@@ -157,6 +165,7 @@ export class TaskDispatchService {
                 reason: 'Operator-configured default T3 scratch destination for projectless tasks.',
             };
         }
+
         if (hosts.length > 1) {
             return this._blocked('Multiple authorized scratch hosts are configured. Specify a host, or configure one general project.', status);
         }
@@ -189,6 +198,7 @@ export class TaskDispatchService {
 
     async run(name, args) {
         this._validateArguments(name, args);
+
         const plan = await this._plan(args);
         if (name === 'worker_task_plan') {
             return this._asToolResult(plan);
