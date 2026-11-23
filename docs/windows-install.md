@@ -30,7 +30,19 @@
 
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Install-WorkerGateway.ps1 -GeneralProject general-work
 
-這個參數不會建立 T3 Project。沒有現有通用 Workspace 或原版已設定的 Scratch 預設時，新行銷任務應被 Skill／Gateway 安全阻擋，不能偷偷改派到無關 Pilot。Worker Workspace Provisioning 仍是後續核心工作。
+這個參數不會建立 T3 Project。若想讓 Session Router 在缺少適當工作區時，請 Gateway 自動準備**受控的本機 T3 Git 專案**，安裝時可選擇：
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Install-WorkerGateway.ps1 -EnableProvisioning -ProvisionHost my-pc -ProvisionModelInstance "<fleet_models 的 providerInstanceId>" -ProvisionModel "<fleet_models 的 modelId>"
+
+這會在目前 Windows 帳號的 `%LOCALAPPDATA%\AIWorkerGateway\workspaces` 下啟用專屬 Git 工作區根目錄、預設使用官方 `t3 project add` 註冊，然後再用 Fleet 的 `fleet_projects` 確認可派工；**不修改原版 Fleet Gateway 的原始碼或資料庫**。如已自行準備其他專用根目錄，可另加 `-WorkspaceRoot "已存在目錄"`。沒有合適預設模型時，`-ProvisionModelInstance` 與 `-ProvisionModel` 需引用實際 `fleet_models` 列出的模型，不能猜測。
+
+**重要：原本 `omb-pilot-test` 的 Operate Token 只授權 Pilot。** 它足以驗證已存在的 Pilot，但即使 T3 成功建立新專案，這把 Token 也不能看到或派工到新專案。要完成新專案派工，操作者須另行批准適用於這台測試 Host／新專案的 Fleet Client 權限；測試時使用隔離帳號、不要直接把廣泛權限提供給所有共用 3791 的助理。安裝器不會自行提升舊權限。
+
+如果 3791 已由排程自動啟動，重跑安裝器前先透過確認過的 `AIWorkerGateway` 排程停止它：
+
+    Stop-ScheduledTask -TaskName AIWorkerGateway
+
+不要停止 3790／3773，也不要強行終止不明程序。安裝器會在登入排程啟動後驗證 3791 健康狀態。
 
 ## 匯入 Skill（只需一次）
 
@@ -64,6 +76,6 @@ Skill 是路由決策程序，不是授權或執行器。
 
 ## 目前仍未做到
 
-這個初版腳本以「**已經有可用的原版 3790**」為前提；尚未做從全新電腦自動部署、配對及設定原版 Fleet 的完整流程，也未實作 Worker-local T3 Project 自動建立、第三方助理 Skills UI 自動啟用，或 Windows 登入前真正的 OS Service。Windows CI 目前只做腳本解析、無副作用 PlanOnly、DPAPI 測試；實機註冊排程、重開機登入驗證仍需在使用者測試機完成。
+這個初版腳本以「**已經有可用的原版 3790**」為前提；尚未做從全新電腦自動部署、配對及設定原版 Fleet 的完整流程、非 Git 執行工作區、第三方助理 Skills UI 自動啟用，或 Windows 登入前真正的 OS Service。**受控本機 T3 Git Project Provisioning 已加入程式碼，但仍需在本機 Windows + T3 0.1.10 + Fleet 授權實測，不能當作已完成實機驗收。**Windows CI 目前只做腳本解析、無副作用 PlanOnly、DPAPI 測試；實機註冊排程、重開機登入驗證仍需在使用者測試機完成。
 
 自然語言驗收詳見 agent-zero-context-test.md。
