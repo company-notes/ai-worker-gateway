@@ -6,6 +6,18 @@ An independent, **local-only experimental MCP facade** that extends the original
 
 **Not yet supported:** automatic creation/registration of a previously unknown T3 Project, dynamic semantic classification across multiple worker projects, remote OAuth, multi-user tenant isolation, and live Windows/T3 acceptance **of the new high-level task tools**. `worker_workspace_prepare` deliberately reports `dispatchReady: false` and requires operator registration. Do not confuse a prepared directory with a new company project or a registered T3 Project.
 
+## Windows user-logon bootstrap (existing T3 and Fleet installed)
+
+From the cloned Repository, **stop any manually running 3791 process first**, then run in Windows PowerShell 5.1+:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Install-WorkerGateway.ps1
+```
+
+The installer prompts for your existing **Fleet client** bearer token, checks 3773 and 3790, saves both wrapper secrets with per-user DPAPI encryption and sets up a limited-privilege Task Scheduler task at **user logon**. It exports the Skill to `%LOCALAPPDATA%\AIWorkerGateway\skills\session-router\SKILL.md`; import and enable it in your AI client's Skills UI (or pass `-SkillInstallDirectory` when you know its officially supported local Skills directory). Then add **only** `http://127.0.0.1:3791/mcp` to that client's MCP list, using its wrapper client token. [Full installer guide](docs/windows-install.md).
+
+**Not yet unattended before Windows sign-in**: the user-logon task is not an OS-level Windows service. It deliberately runs as the same user who owns the encrypted secrets and T3 session. The script also does **not** install/configure a missing Fleet Gateway, create a missing T3 Project, or automatically activate Skills inside an arbitrary third-party client.
+
 ## Quick start (dedicated test account, loopback only)
 
 1. Install Node.js 22.16+ and run the *original* upstream Fleet Gateway separately, following its official setup. This facade does not replace its OAuth/host enrollment.
@@ -16,7 +28,7 @@ An independent, **local-only experimental MCP facade** that extends the original
 
 See [`.env.example`](.env.example) for names and [docs/architecture.md](docs/architecture.md) for the security contract and upstream update procedure.
 
-**Already have T3/Fleet installed on Windows? Do not uninstall it.** Follow the [side-by-side Windows retest guide](docs/windows-retest.md) to connect this facade on port 3791 to the existing service on port 3790. The submodule is a source pin, not a second service installation.
+**Already have T3/Fleet installed on Windows? Do not uninstall it.** Use the [Windows bootstrap installer](docs/windows-install.md) to install 3791, export the Session Router Skill, store the two tokens using Windows DPAPI and register user-logon autostart. Follow the [side-by-side Windows retest guide](docs/windows-retest.md) to connect this facade on port 3791 to the existing service on port 3790. The submodule is a source pin, not a second service installation.
 
 Operator configuration must also follow the [worker execution and workspace policy](docs/worker-policy.md).
 
@@ -24,13 +36,13 @@ Operator configuration must also follow the [worker execution and workspace poli
 
 **One-time operator prerequisite:** configure a dedicated authorized general-work Fleet alias (for example `general-work`) and set `AWG_GENERAL_PROJECT=general-work` before starting this wrapper; **or** configure exactly one host's verified upstream scratch `hosts[].defaultProject`. This gateway does not invent a T3 project, and will refuse unrelated work if only `pilot` is available. The upstream bearer client must have Operate access to the selected destination.
 
-After that, give a **new, empty-context assistant only the MCP connection to port 3791**, then simply say something like "幫我製作一個行銷成效追蹤工具，包含可讀的成果". It should discover `worker_task_plan` and `worker_task_start` from MCP, create a fresh upstream job, return its ID, read progress through `work_status` and `work_messages`, and continue the same ID if you ask for improvements. No separate direct 3790/3773 MCP connections or repo Skill installation are required for this v0.2 experiment.
+After that, install/enable the **Session Router Skill** in the new assistant and give it **only the MCP connection to port 3791**. Then simply say something like "幫我製作一個行銷成效追蹤工具，包含可讀的成果". It should discover `worker_task_plan` and `worker_task_start` from MCP, create a fresh upstream job, return its ID, read progress through `work_status` and `work_messages`, and continue the same ID if you ask for improvements. No separate direct 3790/3773 MCP connections or access to earlier chat transcripts are required.
 
 See the [zero-context assistant acceptance guide](docs/agent-zero-context-test.md) for exact pass/fail criteria, missing-config behavior, and a separate unrelated follow-up task. A generic destination is a **worker execution workspace**, not a company-level Project or Card.
 
 ## Agent routing skill
 
-An optional [Gateway-neutral Session Router Skill](.agents/skills/session-router/SKILL.md) documents when to find, start, or continue jobs and explains why preparing a folder is not yet T3 Project registration. Each AI client still needs its own explicit MCP access.
+The [Session Router Skill](.agents/skills/session-router/SKILL.md) is the **intended routing policy** for every fresh assistant: discover existing jobs and workspaces, decide whether to continue or start, then call the Gateway. The MCP `worker_task_plan` / `worker_task_start` endpoints are experimental backend helpers, **not** a replacement for the Skill's intent judgment. Installing the Skill does not itself create a Gateway grant or an unregistered T3 Project.
 
 Open implementation milestones are tracked in [GitHub Issues](https://github.com/company-notes/ai-worker-gateway/issues).
 

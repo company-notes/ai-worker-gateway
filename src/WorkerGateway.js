@@ -129,7 +129,7 @@ export class WorkerGateway {
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
             if (message.result && typeof message.result === 'object') {
-                const guide = 'For any new natural-language work request, call worker_task_plan then worker_task_start with a new requestId. Do not reuse an unrelated project or old job. For follow-ups inspect work_list and use work_continue on the confirmed jobId. If task planning reports no authorized general-purpose destination, tell the operator to configure one; do not pretend the folder preparation tools register a project.';
+                const guide = 'Follow the installed Session Router Skill for intent routing: first identify existing jobs, distinguish follow-ups from independent new work, and select a suitable authorized workspace. The gateway offers fleet_status, work_list, work_start, work_continue, and optional worker_task_plan / worker_task_start helpers. A shortcut does not replace routing judgment or provision a missing T3 Project. If no authorized workspace is available, report the missing capability instead of silently using an unrelated Pilot project.';
                 message.result.instructions = [message.result.instructions, guide].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }

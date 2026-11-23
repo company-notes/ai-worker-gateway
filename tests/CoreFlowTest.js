@@ -92,7 +92,7 @@ after(async () => environment.close());
 test('assistant discovers upstream tools and extensions, starts an upstream job, and prepares a local workspace', async () => {
     const init = await environment.client.request('initialize', { protocolVersion: '2025-06-18' });
     assert.equal(init.body.result.serverInfo.name, 'unmodified-upstream', 'Upstream handshake should be preserved');
-    assert.match(init.body.result.instructions, /worker_task_plan then worker_task_start/,
+    assert.match(init.body.result.instructions, /installed Session Router Skill/,
         'A new assistant should learn task delegation from MCP initialize, without private chat context');
 
     const tools = await environment.client.request('tools/list');
