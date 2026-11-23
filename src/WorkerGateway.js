@@ -95,17 +95,32 @@ export class WorkerGateway {
         };
     }
 
+    _extensionResult(id, result) {
+        return { jsonrpc: '2.0', id, result };
+    }
+
     async _handleExtension(payload) {
         const { name, arguments: args } = payload.params;
-        if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length !== 1) {
-            return this._toolResult(payload.id, 'Expected exactly one name argument', true);
-        }
-
         try {
+            if (this.taskDispatch.handles(name)) {
+                return this._extensionResult(payload.id, await this.taskDispatch.run(name, args));
+            }
+            if (name === 'worker_workspace_ensure') {
+                const value = await this.provision.ensure(args);
+                return this._extensionResult(payload.id, {
+                    content: [{ type: 'text', text: JSON.stringify(value) }],
+                    structuredContent: value,
+                    isError: false,
+                });
+            }
+            if (!args || typeof args !== 'object' || Array.isArray(args) ||
+                Object.keys(args).length !== 1 || typeof args.name !== 'string') {
+                throw new Error('Expected exactly one name argument');
+            }
+
             const value = name === 'worker_workspace_plan'
                 ? await this.workspaces.plan(args.name)
                 : await this.workspaces.prepare(args.name);
-
             return this._toolResult(payload.id, value);
         } catch (error) {
             return this._toolResult(payload.id, error.message, true);
@@ -115,41 +130,8 @@ export class WorkerGateway {
     async _handleMCP(payload, protocolVersion) {
         const extensionNames = new Set(this._extensionTools().map((tool) => tool.name));
         if (payload.method === 'tools/call' && extensionNames.has(payload.params?.name)) {
-            if (payload.params.name === 'worker_workspace_ensure') {
-                try {
-                    const value = await this.provision.ensure(payload.params.arguments);
-                    return {
-                        status: 200,
-                        body: JSON.stringify({
-                            jsonrpc: '2.0',
-                            id: payload.id,
-                            result: {
-                                content: [{ type: 'text', text: JSON.stringify(value) }],
-                                structuredContent: value,
-                                isError: false,
-                            },
-                        }),
-                        contentType: 'application/json',
-                    };
-                } catch (error) {
-                    return {
-                        status: 200,
-                        body: JSON.stringify(this._toolResult(payload.id, error.message, true)),
-                        contentType: 'application/json',
-                    };
-                }
-            }
-
-            if (this.taskDispatch.handles(payload.params.name)) {
-                try {
-                    const result = await this.taskDispatch.run(payload.params.name, payload.params.arguments);
-                    return { status: 200, body: JSON.stringify({ jsonrpc: '2.0', id: payload.id, result }), contentType: 'application/json' };
-                } catch (error) {
-                    return { status: 200, body: JSON.stringify(this._toolResult(payload.id, error.message, true)), contentType: 'application/json' };
-                }
-            }
-
-            return { status: 200, body: JSON.stringify(await this._handleExtension(payload)), contentType: 'application/json' };
+            const result = await this._handleExtension(payload);
+            return { status: 200, body: JSON.stringify(result), contentType: 'application/json' };
         }
 
         const upstreamResponse = await this.upstream.forward(payload, protocolVersion);
@@ -157,7 +139,7 @@ export class WorkerGateway {
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
             if (message.result && typeof message.result === 'object') {
-                const guide = 'Follow the installed Session Router Skill for intent routing: first identify existing jobs, distinguish follow-ups from independent new work, and select a suitable authorized workspace. The gateway offers fleet_status, work_list, work_start, work_continue and optional worker_task_plan / worker_task_start helpers. If no suitable workspace exists, use worker_workspace_ensure only when the operator has enabled safe T3 provisioning; it returns a Fleet target and optional modelSelection when dispatchReady is true. A shortcut does not replace routing judgment or provision a missing T3 Project. If no authorized workspace is available, report the missing capability instead of silently using an unrelated Pilot project.';
+                const guide = 'Follow the installed Session Router Skill for intent routing: first identify existing jobs, distinguish follow-ups from independent new work, and select a suitable authorized workspace. The gateway offers fleet_status, work_list, work_start, work_continue and optional worker_task_plan / worker_task_start helpers. If no suitable workspace exists, use worker_workspace_ensure only when the operator has enabled safe T3 provisioning; it returns a Fleet target and optional modelSelection when dispatchReady is true. A shortcut does not replace the Session Router's routing judgment. If no authorized workspace is available, report the missing capability instead of silently using an unrelated Pilot project.';
                 message.result.instructions = [message.result.instructions, guide].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
