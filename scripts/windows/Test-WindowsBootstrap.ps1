@@ -38,6 +38,14 @@ if ((Test-Path -LiteralPath $settingsPath) -ne $existedBefore) { throw 'PlanOnly
 $manual = & (Join-Path $PSScriptRoot 'Install-WorkerGateway.ps1') -PlanOnly -NoAutoStart
 if ($manual.startup -ne 'manual') { throw 'Manual mode plan must be explicit.' }
 
+$provisioningPlan = & (Join-Path $PSScriptRoot 'Install-WorkerGateway.ps1') -PlanOnly -EnableProvisioning
+if ($provisioningPlan.enablesProvisioning -ne $true) {
+    throw 'Provisioning mode must be explicit, and PlanOnly cannot create a T3 project.'
+}
+if ((Test-Path -LiteralPath $settingsPath) -ne $existedBefore) {
+    throw 'Planning provisioning must not create or alter a persisted configuration.'
+}
+
 $secret = ConvertTo-SecureString -String 'local-bootstrap-dpapi-test-0123456789' -AsPlainText -Force
 $cipher = ConvertFrom-SecureString -SecureString $secret
 $roundTrip = ConvertTo-SecureString -String $cipher

@@ -47,7 +47,12 @@ if ($null -ne $settings.PSObject.Properties['provision_host'] -and $settings.pro
     $env:AWG_PROVISION_HOST = [string]$settings.provision_host
 }
 if ($null -ne $settings.PSObject.Properties['provision_model_selection'] -and $settings.provision_model_selection) {
-    $env:AWG_PROVISION_MODEL_SELECTION = $settings.provision_model_selection | ConvertTo-Json -Depth 10 -Compress
+    $model = $settings.provision_model_selection
+    $selection = @{
+        instanceId = [string]$model.instance_id
+        model = [string]$model.model
+    }
+    $env:AWG_PROVISION_MODEL_SELECTION = $selection | ConvertTo-Json -Depth 10 -Compress
 }
 
 $logFile = Join-Path $stateRoot 'gateway.log'

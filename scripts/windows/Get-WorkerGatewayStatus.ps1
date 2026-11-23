@@ -20,6 +20,14 @@ Write-Host ('Repository: ' + $settings.repoRoot)
 Write-Host ('MCP URL: http://127.0.0.1:' + $settings.listenPort + '/mcp')
 Write-Host ('General execution alias: ' + $(if ($settings.generalProject) { $settings.generalProject } else { 'NOT CONFIGURED' }))
 Write-Host ('Skill package: ' + (Join-Path $stateRoot 'skills\session-router\SKILL.md'))
+if ($null -ne $settings.PSObject.Properties['provision_host'] -and $settings.provision_host) {
+    Write-Host ('Managed local T3 Provisioning: enabled for ' + [string]$settings.provision_host)
+    $modelStatus = if ($null -ne $settings.PSObject.Properties['provision_model_selection'] -and
+        $settings.provision_model_selection) { 'operator selected' } else { 'no explicit selection' }
+    Write-Host ('Provisioning launch model: ' + $modelStatus)
+} else {
+    Write-Host 'Managed local T3 Provisioning: disabled'
+}
 
 $client = New-Object Net.Sockets.TcpClient
 try {

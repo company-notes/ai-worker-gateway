@@ -258,7 +258,7 @@ if ([bool]$ProvisionModelInstance -ne [bool]$ProvisionModel) {
 $provisionModelSelection = $null
 if ($ProvisionModelInstance -and $ProvisionModel) {
     $provisionModelSelection = @{
-        instanceId = $ProvisionModelInstance
+        instance_id = $ProvisionModelInstance
         model = $ProvisionModel
     }
 } elseif ($null -ne $existing -and $null -ne $existing.PSObject.Properties['provision_model_selection']) {
