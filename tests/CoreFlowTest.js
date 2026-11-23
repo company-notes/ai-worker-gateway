@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -122,8 +122,14 @@ test('workspace names cannot escape the approved root or replace symlinked paths
     });
     assert.equal(outside.body.result.isError, true, 'Path traversal must be denied');
 
-    await mkdir(path.join(environment.root, 'real-folder'));
-    await symlink(path.join(environment.root, 'real-folder'), path.join(environment.root, 'linked-folder'));
+    const targetPath = path.join(environment.root, 'real-folder');
+    const linkedPath = path.join(environment.root, 'linked-folder');
+    await mkdir(targetPath);
+    // Windows directory junctions do not require the symlink privilege.
+    await symlink(targetPath, linkedPath, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.equal((await lstat(linkedPath)).isSymbolicLink(), true,
+        'Test fixture must be an actual directory link, not a regular folder');
+
     const linked = await environment.client.request('tools/call', {
         name: 'worker_workspace_prepare', arguments: { name: 'linked-folder' },
     });
