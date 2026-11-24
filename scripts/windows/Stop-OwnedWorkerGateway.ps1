@@ -37,19 +37,30 @@ function Assert-OwnedGatewayProcess([int]$processId, [string]$expectedNodePath, 
         throw 'Port belongs to a different executable. Refusing to stop an unknown service.'
     }
 
-    $fullEntrypoint = [IO.Path]::GetFullPath($expectedEntrypoint)
+    # Windows expands short (8.3) paths in GetFullPath. The original Node
+    # argv can retain the short spelling, so accept only either exact spelling.
+    $entrypointPaths = @($expectedEntrypoint, [IO.Path]::GetFullPath($expectedEntrypoint))
     $commandLine = ([string]$candidate.CommandLine).TrimEnd()
-    $quotedEntrypoint = '"' + $fullEntrypoint + '"'
-    $hasQuotedPath = $commandLine.EndsWith($quotedEntrypoint, [StringComparison]::OrdinalIgnoreCase)
-    $hasPlainPath = $commandLine.EndsWith($fullEntrypoint, [StringComparison]::OrdinalIgnoreCase)
-    if (-not $hasQuotedPath -and -not $hasPlainPath) {
-        throw 'Port belongs to a different Node script. Refusing to stop an unknown service.'
-    }
+    $entrypointMatched = $false
+    foreach ($entrypointPath in $entrypointPaths) {
+        $quotedEntrypoint = '"' + $entrypointPath + '"'
+        foreach ($suffix in @($quotedEntrypoint, $entrypointPath)) {
+            if (-not $commandLine.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
 
-    $suffixLength = if ($hasQuotedPath) { $quotedEntrypoint.Length } else { $fullEntrypoint.Length }
-    $prefix = $commandLine.Substring(0, $commandLine.Length - $suffixLength)
-    if ($prefix.Length -eq 0 -or -not [char]::IsWhiteSpace($prefix[$prefix.Length - 1])) {
-        throw 'Node command line does not contain a separate Gateway entrypoint argument.'
+            $prefix = $commandLine.Substring(0, $commandLine.Length - $suffix.Length)
+            if ($prefix.Length -gt 0 -and [char]::IsWhiteSpace($prefix[$prefix.Length - 1])) {
+                $entrypointMatched = $true
+                break
+            }
+        }
+        if ($entrypointMatched) {
+            break
+        }
+    }
+    if (-not $entrypointMatched) {
+        throw 'Port belongs to a different Node script. Refusing to stop an unknown service.'
     }
 
     $owner = Invoke-CimMethod -InputObject $candidate -MethodName GetOwnerSid -ErrorAction Stop
