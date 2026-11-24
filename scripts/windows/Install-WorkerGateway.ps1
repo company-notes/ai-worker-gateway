@@ -154,7 +154,6 @@ if ($EnableProvisioning -and $NoProvisioning) {
 }
 $grantHost = $ProvisionHost
 
-
 if ($PSBoundParameters.ContainsKey('GeneralProject')) {
     if ($GeneralProject -and $GeneralProject -notmatch '^[a-zA-Z0-9._-]{1,64}$') {
         throw 'GeneralProject must be an exact, existing Fleet alias, not an arbitrary directory.'
@@ -226,7 +225,6 @@ if ($UpstreamTokenFile) {
     $managedFleetClientId = [string]$newGrant.clientId
     $managedFleetGrant = $true
 }
-
 
 if ($upstreamSecret.Length -lt 24) {
     throw 'Fleet Gateway client token must contain at least 24 characters.'
