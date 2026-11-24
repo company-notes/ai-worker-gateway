@@ -131,7 +131,7 @@ test('assistant discovers upstream tools and extensions, starts an upstream job,
     assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), [
         'work_start', 'work_status', 'work_continue',
         'worker_task_plan', 'worker_task_start', 'worker_workspace_ensure',
-        'worker_delivery_link',
+        'worker_delivery_link', 'worker_delivery_open',
         'worker_notification_status', 'worker_notification_setup',
         'worker_notification_pairing_status', 'worker_notification_decline',
         'worker_workspace_plan', 'worker_workspace_prepare',

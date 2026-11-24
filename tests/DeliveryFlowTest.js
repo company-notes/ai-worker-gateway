@@ -95,8 +95,7 @@ test('the real Fleet work_status is a flat job view; opening Explorer must succe
     assert.equal(result.structuredContent.opened, true);
     assert.equal(result.structuredContent.folderPath, await fileSystem.realpath(environment.worktree));
     assert.ok(result.structuredContent.files.includes('roas-tracker.html'));
-    assert.equal(result.structuredContent.folderPath, await fileSystem.realpath(environment.worktree));
-    assert.deepEqual(environment.opens, Array(3).fill(await fileSystem.realpath(environment.worktree)));
+    assert.deepEqual(environment.opens, [await fileSystem.realpath(environment.worktree)]);
 });
 
 test('artifact folders may be inspected while the worker reports running or waits on delegated work', async () => {
@@ -122,7 +121,7 @@ test('a completed marketing tool gives a one-click local Explorer link, not a jo
 
     const opened = await fetch(result.structuredContent.url);
     assert.equal(opened.status, 200);
-    assert.deepEqual(environment.opens, [await fileSystem.realpath(environment.worktree)]);
+    assert.deepEqual(environment.opens, Array(3).fill(await fileSystem.realpath(environment.worktree)));
     assert.equal((await fetch(result.structuredContent.url)).status, 410,
         'A folder-opening capability link is single-use; it cannot become a general unauthenticated MCP credential.');
 });
