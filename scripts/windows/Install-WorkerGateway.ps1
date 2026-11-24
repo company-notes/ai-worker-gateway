@@ -129,6 +129,11 @@ if ($null -ne $existingTask) {
     if (-not $owned) { throw 'A different Windows scheduled task already uses AIWorkerGateway; refusing to overwrite it.' }
 }
 
+$existing = $null
+if (Test-Path -LiteralPath $settingsFile -PathType Leaf) {
+    $existing = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
 # A single local host is selected automatically when it is already enrolled in
 # the operator-owned Fleet installation. Multiple hosts are never guessed.
 if (-not $ProvisionHost -and $null -ne $existing -and
@@ -149,11 +154,6 @@ if ($EnableProvisioning -and $NoProvisioning) {
 }
 $grantHost = $ProvisionHost
 
-
-$existing = $null
-if (Test-Path -LiteralPath $settingsFile -PathType Leaf) {
-    $existing = Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
-}
 
 if ($PSBoundParameters.ContainsKey('GeneralProject')) {
     if ($GeneralProject -and $GeneralProject -notmatch '^[a-zA-Z0-9._-]{1,64}$') {
