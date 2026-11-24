@@ -6,6 +6,7 @@ param(
     [string]$SkillInstallDirectory,
     [string]$WorkspaceRoot,
     [switch]$EnableProvisioning,
+    [switch]$NoProvisioning,
     [string]$ProvisionHost,
     [string]$ProvisionModelInstance,
     [string]$ProvisionModel,
@@ -26,6 +27,11 @@ $sourceSkill = Join-Path $repoRoot '.agents\skills\session-router\SKILL.md'
 $settingsFile = Join-Path $stateRoot 'settings.json'
 $upstreamSecretFile = Join-Path $stateRoot 'upstream-token.dpapi'
 $clientSecretFile = Join-Path $stateRoot 'client-token.dpapi'
+$fleetRoot = Join-Path $env:LOCALAPPDATA 'T3FleetGateway'
+$fleetCliPath = Join-Path $fleetRoot 'app\bin\t3-fleet-gateway.js'
+$fleetConfigPath = Join-Path $fleetRoot 'config.json'
+$fleetDataPath = Join-Path $fleetRoot 'data'
+$grantInstaller = Join-Path $PSScriptRoot 'New-ManagedFleetGrant.ps1'
 
 function Test-LoopbackPort([int]$port) {
     $client = New-Object Net.Sockets.TcpClient
@@ -91,7 +97,7 @@ if ($PlanOnly) {
         skillSource = $sourceSkill
         changesUpstream = $false
         createsWorkspaceProject = $false
-        enablesProvisioning = [bool]$EnableProvisioning
+        enablesProvisioning = [bool]($EnableProvisioning -or $ProvisionHost)
     }
     return
 }
@@ -114,10 +120,6 @@ if (-not (Test-LoopbackPort 3773)) {
 if (-not (Test-LoopbackPort 3790)) {
     throw 'Original T3 Fleet Gateway is not listening on 127.0.0.1:3790. This installer attaches to an existing upstream; it does not install or patch T3 Fleet Gateway.'
 }
-if (Test-LoopbackPort 3791) {
-    throw 'Port 3791 is already in use. Stop the manual Worker Gateway process before registering its automatic startup; do not kill an unknown process.'
-}
-
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($NoAutoStart -and $null -ne $existingTask) {
     throw 'An autostart task already exists. Remove it with Uninstall-WorkerGateway.ps1 before switching to manual-only mode.'
@@ -126,6 +128,29 @@ if ($null -ne $existingTask) {
     $owned = @($existingTask.Actions | Where-Object { $_.Arguments -like '*Start-WorkerGateway.ps1*' }).Count -eq 1
     if (-not $owned) { throw 'A different Windows scheduled task already uses AIWorkerGateway; refusing to overwrite it.' }
 }
+
+# A single local host is selected automatically when it is already enrolled in
+# the operator-owned Fleet installation. Multiple hosts are never guessed.
+if (-not $ProvisionHost -and $null -ne $existing -and
+    $null -ne $existing.PSObject.Properties['provision_host'] -and $existing.provision_host) {
+    $ProvisionHost = [string]$existing.provision_host
+}
+if (-not $ProvisionHost -and (Test-Path -LiteralPath $fleetConfigPath -PathType Leaf)) {
+    $localFleetConfig = Get-Content -LiteralPath $fleetConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $localHosts = @($localFleetConfig.hosts | Where-Object {
+        $_.t3Url -eq 'http://127.0.0.1:3773' -or $_.t3Url -eq 'http://localhost:3773'
+    })
+    if ($localHosts.Count -eq 1) {
+        $ProvisionHost = [string]$localHosts[0].id
+    }
+}
+if ($EnableProvisioning -and $NoProvisioning) {
+    throw 'Choose either EnableProvisioning or NoProvisioning, not both.'
+}
+if ($NoProvisioning) {
+    $ProvisionHost = $null
+}
+
 
 $existing = $null
 if (Test-Path -LiteralPath $settingsFile -PathType Leaf) {
@@ -163,18 +188,43 @@ if ($SkillInstallDirectory) {
     }
 }
 
-if (-not $UpstreamTokenFile -and -not (Test-Path -LiteralPath $upstreamSecretFile -PathType Leaf)) {
-    $upstreamSecret = Read-Host 'Paste an existing Fleet Gateway client bearer token for the wrapper (not the T3 pairing credential)' -AsSecureString
-} elseif ($UpstreamTokenFile) {
+# Gateway-to-Fleet credentials are internal deployment details. Users only
+# receive ONE client token for OpenMausBot at port 3791. The installer manages
+# a separate host-scoped operate grant without printing it.
+$managedFleetGrant = $false
+$managedFleetClientId = $null
+$previousManaged = $null -ne $existing -and
+    $null -ne $existing.PSObject.Properties['managedFleetGrant'] -and
+    $existing.managedFleetGrant -eq $true
+if ($UpstreamTokenFile) {
     if (-not (Test-Path -LiteralPath $UpstreamTokenFile -PathType Leaf)) {
         throw 'UpstreamTokenFile does not exist.'
     }
     $rawToken = (Get-Content -LiteralPath $UpstreamTokenFile -Raw -Encoding UTF8).Trim()
     $upstreamSecret = ConvertTo-SecureString -String $rawToken -AsPlainText -Force
     $rawToken = $null
-} else {
+} elseif ($previousManaged -and (Test-Path -LiteralPath $upstreamSecretFile -PathType Leaf)) {
     $upstreamSecret = Read-Secret $upstreamSecretFile
+    $managedFleetGrant = $true
+    if ($null -ne $existing.PSObject.Properties['managedFleetClientId']) {
+        $managedFleetClientId = [string]$existing.managedFleetClientId
+    }
+} else {
+    if (-not $ProvisionHost) {
+        throw 'Cannot determine one local Fleet host. The operator must first configure one authorized local host.'
+    }
+    if (-not (Test-Path -LiteralPath $fleetCliPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $fleetConfigPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $fleetDataPath -PathType Container)) {
+        throw 'Existing local Fleet installation not found. Full clean-machine Fleet bootstrap is not yet supported by this installer.'
+    }
+    Write-Host ('Preparing one internal, host-scoped worker authorization for ' + $ProvisionHost + ' (no extra token to copy).')
+    $newGrant = & $grantInstaller -NodePath $node -FleetCliPath $fleetCliPath -HostId $ProvisionHost -FleetConfigPath $fleetConfigPath -FleetDataDir $fleetDataPath
+    $upstreamSecret = $newGrant.secret
+    $managedFleetClientId = [string]$newGrant.clientId
+    $managedFleetGrant = $true
 }
+
 
 if ($upstreamSecret.Length -lt 24) {
     throw 'Fleet Gateway client token must contain at least 24 characters.'
@@ -207,7 +257,12 @@ try {
 }
 
 $clientSecret = $null
-if ((Test-Path -LiteralPath $clientSecretFile -PathType Leaf) -and -not $RotateClientToken) {
+# Existing installations are upgraded to a newly generated external token once
+# because the old token may have been copied into diagnostic transcripts.
+$rotateOnUpgrade = $null -ne $existing -and
+    $null -eq $existing.PSObject.Properties['clientTokenVersion']
+if ((Test-Path -LiteralPath $clientSecretFile -PathType Leaf) -and
+    -not $RotateClientToken -and -not $rotateOnUpgrade) {
     $clientSecret = Read-Secret $clientSecretFile
 } else {
     $freshToken = & $node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
@@ -218,13 +273,24 @@ if ((Get-ClearText $clientSecret) -eq (Get-ClearText $upstreamSecret)) {
     throw 'The wrapper inbound token must differ from its upstream Fleet token.'
 }
 
+# Reinstallation safely stops ONLY this installer's owned scheduled task.
+# Existing 3790/T3 services and other processes are left untouched.
+if (Test-LoopbackPort 3791) {
+    if ($null -eq $existingTask) {
+        throw 'Port 3791 belongs to an unknown/manual process. Stop that process before the installer can safely restart its own task.'
+    }
+    Stop-ScheduledTask -TaskName $taskName
+    for ($attempt = 0; $attempt -lt 30 -and (Test-LoopbackPort 3791); $attempt++) {
+        Start-Sleep -Milliseconds 500
+    }
+    if (Test-LoopbackPort 3791) {
+        throw 'The owned scheduled task was stopped but port 3791 remains occupied. Diagnose the unknown process before retrying.'
+    }
+}
+
 Assert-PrivateFolder $stateRoot
 
-$provisionEnabled = $EnableProvisioning -or $PSBoundParameters.ContainsKey('ProvisionHost')
-if (-not $provisionEnabled -and $null -ne $existing -and $null -ne $existing.PSObject.Properties['provision_host']) {
-    $ProvisionHost = [string]$existing.provision_host
-    $provisionEnabled = -not [string]::IsNullOrWhiteSpace($ProvisionHost)
-}
+$provisionEnabled = -not $NoProvisioning -and -not [string]::IsNullOrWhiteSpace($ProvisionHost)
 if ($provisionEnabled) {
     if (-not $ProvisionHost) {
         $candidates = @($fleetStatus.hosts | Where-Object {
@@ -278,6 +344,9 @@ $settings = @{
     workspaceRoot = if ($WorkspaceRoot) { [IO.Path]::GetFullPath($WorkspaceRoot) } else { $null }
     provision_host = if ($provisionEnabled) { $ProvisionHost } else { $null }
     provision_model_selection = $provisionModelSelection
+    managedFleetGrant = $managedFleetGrant
+    managedFleetClientId = $managedFleetClientId
+    clientTokenVersion = 2
 }
 $encoded = $settings | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText($settingsFile, $encoded, (New-Object Text.UTF8Encoding($false)))
@@ -329,6 +398,9 @@ if (-not $NoAutoStart) {
 }
 
 Write-Host 'AI Worker Gateway configuration installed without altering T3/Fleet source or data.'
+if ($RotateClientToken -or $rotateOnUpgrade) {
+    Write-Warning 'The one OpenMausBot MCP client key was rotated. Update local-3791 in OpenMausBot using Show-WorkerGatewayClientToken.ps1 -Clipboard.'
+}
 Write-Host 'Assistant MCP URL: http://127.0.0.1:3791/mcp'
 Write-Host ('Session Router Skill package: ' + (Join-Path $exportFolder 'SKILL.md'))
 if ($SkillInstallDirectory) {
@@ -336,8 +408,8 @@ if ($SkillInstallDirectory) {
 } else {
     Write-Host 'Import/enable this Skill in the assistant UI; a file copy alone does not activate it in an unknown client.'
 }
-Write-Host 'Show your wrapper client token locally with:'
-Write-Host ('  powershell -NoProfile -File "' + (Join-Path $PSScriptRoot 'Show-WorkerGatewayClientToken.ps1') + '"')
+Write-Host 'Copy your ONE OpenMausBot MCP client token securely with:'
+Write-Host ('  powershell -NoProfile -File "' + (Join-Path $PSScriptRoot 'Show-WorkerGatewayClientToken.ps1') + '" -Clipboard')
 if ($NoAutoStart) {
     Write-Host ('Start manually with: powershell -NoProfile -File "' + $runner + '"')
 } else {
