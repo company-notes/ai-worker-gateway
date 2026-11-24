@@ -17,14 +17,15 @@ OpenMausBot 的 Skill 會按需求觸發，是「可用的程序」，**不是**
 
 這是**給專職派工 Bot 的一次性角色設定**，不是每次使用者都要重述的聊天 Prompt。若使用者要一個可獨立在本機開發的混合型 Bot，這份固定角色指令不適用；不能只靠 Skill 保證它自動優先派工。也可依所用 AI 引擎的可用工具權限，減少本地寫檔／Shell 能力，但不能假設 OpenMausBot 所有引擎都支援同一種原生工具封鎖。
 
-## 完成通知和交付物：從工程師文字改成使用者體驗
+## 通用 Webhook 完成通知（任何支援 Webhook 的助理）
 
-1. **派工時自動建立一個 Bot Routine**：只在這個 Bot 尚無「Worker 工作結果提醒」時建立，每約 5 分鐘讀 `local-3791` 的 `work_feed`，使用 `nextCursor` 和「Remember the last run」記下已看過的事件，首次不要回報歷史工作。將結果回報到 Bot 的主聊天，並開啟 App 啟動時補查（如支援）。不用每個 Job 建一個 Routine，不用要求一般使用者自行管理 Job ID。
-2. **完成後簡短通知**：新工作變 idle 時先查 `work_status`、`work_messages`；確認沒有等待子工作、實際成果可用且 Git 版本已保存後，再回報「工具已完成」和檔名。需要使用者回答時說明要回答的問題；失敗時說原因，不假稱完成。如果只是 idle 但尚未確認成果，說「這一輪處理結束，正在檢查成果」。
-3. **開資料夾與版本**：請 Bot 呼叫 `worker_delivery_link`，確認 `versionSaved=true` 才說「已保存版本」，把 `url` 渲染為 **[查看成果資料夾]**；使用者在安裝 Gateway 的**同一台 Windows 電腦**點擊就會開 Explorer。如果沒有保存版本而可以安全續作，直接請 Worker 補 Commit，**不要問使用者要不要 Commit**。24 小時一次性連結過期就新取。
-4. **通知驗收**：結束聊天甚至關閉該話題後，讓 Worker 做完另一輪；不用使用者再次發問也應看到 Windows 提示；若 OpenMausBot Routine 已啟用，還應在 Bot 聊天看到一則新提醒。沒有 Routine 就只能驗收 Windows 提示，**不得宣稱已實現聊天自動通知**。
+1. **第一次交辦時詢問一次**：Bot 在成功派工後呼叫 `worker_notification_status`。若 `preference=unset`，問使用者「完成時要不要自動通知？」；若使用者說不要，呼叫 `worker_notification_decline` 保存偏好，以後不反覆詢問，沒有通知就由使用者自己查進度。
+2. **使用者說要才設定**：Bot 若有正式能力建立自己平台的 Webhook 接收端，可代使用者建立一條持續可用的回呼網址；若平台沒有此能力，不能捏造網址。呼叫 `worker_notification_setup`，把回傳的本機設定連結交給使用者；在本機瀏覽器輸入 Webhook URL、金鑰（可選擇 Authorization Bearer 或 X-Webhook-Key 等標頭）。**這些機密資訊不經過 Bot 聊天**，Gateway 先送 `work.webhook_test`，接收端回覆 2xx 後才啟用並加密保存。只要已啟用，相同助理以後的工作沿用同一條 Webhook。
+3. **多個助理要分流**：不同助理不得共用同一組 3791 MCP 金鑰，否則 Gateway 無法辨識來源。設定頁可替其他助理建立專用連線，會在瀏覽器**只顯示一次**新的 MCP 金鑰；把那一組填進該助理**既有同一個** `http://127.0.0.1:3791/mcp` 連線即可。沒有第二個 Gateway，也不需要告訴使用者 Job ID。
+4. **Webhook 事件**：Gateway 在背景監控自己派出的工作，只把事件送到該助理的固定接收端。JSON 包含 `schema`、`deliveryId`、`event`（例如 `work.turn_finished`／`work.needs_input`／`work.failed`）、`assistant`、`task`、`jobId`、`state`、`occurredAt`、`message`。`jobId` 讓接收助理內部查詢詳細內容，不應呈現給一般使用者。接收端須自行處理重試去重（`X-AWG-Event-ID`）以及回到使用者聊天室／App 的通知；Gateway 不會繞過不同平台的 Webhook API。
+5. **驗收**：結束聊天後讓 Worker 再完成一輪；接收端應收到一則 webhook。使用者在該助理上看到的應是「行銷工具這一輪已結束，請查看成果」，不是 Windows 桌面提示，也不能把 `idle` 當作已驗收成功。拒絕設定通知的助理不得收到事件。關閉 Windows 或 Gateway 時不能宣稱即時推播，恢復後會從持久事件位置繼續檢查。
 
-OpenMausBot 官方說明：[Routines and webhooks](https://docs.openmausbot.com/docs/features/automation)。Routine 在本機由 OpenMausBot 執行，App 關閉或 Windows 睡眠時不會即時執行；它是否建立成功仍需在實際 Bot 中確認。Gateway 的 Windows 提示也可能被系統勿擾設定壓制。
+通知可獨立於 OpenMausBot 使用；這份檔案僅以 OpenMausBot 作為示範助理。若某平台不支援 Webhook 接收，這個功能就必須坦白回報不可用，**不要轉而預設使用該平台 Routine 或 Windows 桌面提示**。
 
 ## 無歷史盲測
 

@@ -32,13 +32,15 @@ Expected:
 - Agent starts one fresh job through the Gateway using `work_start` (or a safe exposed helper), with a new `requestId`, returns the real new Job ID and follows `work_status` / `work_messages`.
 - Check the delivered files or report, not just an `idle` state. Missing upstream model, policy, authorization or workspace is a **failure**, not something the assistant may invent.
 
-### Scenario A2 — 普通使用者的交付與自動通知
+### Scenario A2 — 使用者自主選擇是否接收完成通知
 
-在 Windows 同台電腦、OpenMausBot Bot 已啟用新版 Skill 的情況下：交辦工作後**停止聊天，不再主動問進度**；當工作進入 idle，預期 3791 背景 watcher 會顯示 Windows 提示。若 Bot 在首次派工時成功建立 OpenMausBot Routine，還應看到主聊天中的背景結果。這兩種通知要分別檢查，不得把「助理承諾通知」當成真正完成通知。
+在**未設定通知**的全新助理：派工開始後，Session Router 調用 `worker_notification_status` 看到 `unset`，問一次「完成時要不要主動通知？」。回答「不要」→ `worker_notification_decline` 保存偏好；完成工作時**不應收到任何自動推播**，下次派工也不再問。回答「要」→ `worker_notification_setup`，將一個短效設定頁交給使用者填 URL、Key，不把 Key 貼進聊天；Gateway 必須先向接收端發測試事件，只有收到成功回覆才保存啟用。重新派第二份工作，應自動重用原來的 Webhook，不需要重新問或重填。
 
-助理的交付文字只應有工作名稱、功能摘要、品質檢查和 **查看成果資料夾** 連結，不能在主回覆要求使用者理解或操作 Job ID／worktree／branch／Commit。透過 `worker_delivery_link` 的 `versionSaved` 檢查 Worker 是否真的 Commit；若不是，繼續**同一 Job**請 Worker 保存版本，而不是詢問使用者。點擊 3791 本機 capability 連結，必須打開 Explorer 中驗證過的真實工作資料夾，而不是 Git 根目錄或其他無關目錄。點擊後再按一次會失效，連結隔日可能過期，可以重新取得。
+多位助理測試：在設定頁為第二位助理建立一組新的 3791 MCP 金鑰（不是第二條 MCP），同一位助理的工作只通知它自己的 Webhook。若兩個助理共用同一組金鑰，**不得聲稱能分辨它們**。停用其中一位助理的通知不能停止另一位。回呼必須由接收助理實際呈現在自己的聊天／通知中；沒有接收端能力時不得假裝可以跨平台送訊息。
 
-這些是 Windows 實機／OpenMausBot 的驗收項目；GitHub CI 的合成 T3 與隔離 Git worktree 測試，**不能取代**真正 OpenMausBot 背景 Routine 及 Explorer 桌面通知實測。
+助理交付文字只應有工作名稱、功能摘要、品質檢查和 **查看成果資料夾** 連結，不能在主回覆要求使用者理解或操作 Job ID／worktree／branch／Commit。透過 `worker_delivery_link` 的 `versionSaved` 檢查 Worker 是否真的 Commit；若不是，繼續**同一 Job**請 Worker 保存版本，而不是詢問使用者。點擊 3791 本機 capability 連結，必須打開 Explorer 中驗證過的真實工作資料夾，而不是 Git 根目錄或其他無關目錄。
+
+這些都需要真實接收平台的 Webhook、Windows T3 和 Explorer 實機驗收；CI 只能驗證隔離的 HTTPS/localhost 測試服務、加密儲存及假 T3 狀態，不能證明 OpenMausBot 或任意其他助理平台已替使用者收到聊天通知。
 
 ### Scenario B — continuation
 

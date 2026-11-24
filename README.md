@@ -24,7 +24,7 @@ The installer checks 3773 and 3790, automatically mints a local-host-scoped inte
 
 - **版本自動保存**：Gateway 透過 `WorkRequestPolicy` 為 `work_start`、`work_continue` 的 Worker 工作文字附加預設的「每個有意義、測過的完成階段安全 Git Commit」要求；助理不問使用者是否 Commit，也不自動 Merge 或 Push。它是對 Worker 的工作政策，仍需驗證 Git 實際提交。交付工具 `worker_delivery_link` 提供 `versionSaved`，只有工作分支相對 main 有新提交且工作目錄乾淨時才為 `true`。
 - **點擊開 Explorer**：完成後助理呼叫 `worker_delivery_link`，收到 `url` 後給使用者 **[查看成果資料夾]** 可點連結。連結限在**同一台 Windows 電腦**開啟；它是 24 小時內可使用一次的本機 capability，不能猜路徑、不能開其他專案。若專案不是由本 Gateway 受控建立，會明確拒絕，不偽造連結。點擊會在 Windows 端直接啟動 Explorer，不是要求使用者自己找深層路徑。
-- **工作狀態自動通知**：Windows 安裝版的 3791 在背景讀取自己派出工作的 `work_feed`，保存進度位置；這輪工作變成 `idle`、需要輸入或失敗時顯示 Windows 桌面提示（可能受作業系統勿擾模式影響）。`idle` 不是品質驗收成功。**通知進 OpenMausBot 聊天**則須由 Bot 真正建立並啟用一次性的背景 Routine；Session Router Skill 會要求 Bot 在首次派工時自動設定，若 Bot 沒有可用的 Routine 能力，不能假稱聊天會主動推播。詳見 [OpenMausBot 整合說明](docs/openmausbot-setup.md)。
+- **由助理選擇的通用 Webhook 通知**：Gateway 不再顯示 Windows 桌面提示、也不依賴 OpenMausBot Routine。助理在第一次派工時透過 `worker_notification_status` 確認使用者意願；同意後呼叫 `worker_notification_setup`，讓使用者在本機安全設定頁填入接收端 Webhook URL 和 Key。Gateway 先發測試事件，成功才啟用，往後對該助理的工作事件自動以 POST 傳送至同一個 Webhook；拒絕或未設定則不推播，使用者自行詢問進度。接收端必須自行把事件呈現在對應助理／聊天室，不是任意 URL 都能自動建立聊天通知。每位助理使用獨立的一組 3791 MCP 連線金鑰才能可靠分流；設定頁支援為另一位助理產生專屬金鑰。設定內容加密保存在本機，輪替對外 MCP 金鑰不會抹掉已保存的 Webhook。
 
 一般使用者不需要看到 Job ID、分支、Workspace、Commit ID 或上游 Token。技術識別碼只用於內部追蹤，必要時才展開。
 
