@@ -253,9 +253,12 @@ test('fresh assistant delegates an unrelated marketing task to configured scratc
             'New high-level tool must return the actual upstream Fleet Job ID');
         const last = environment.calls.filter((call) =>
             call.payload.method === 'tools/call' && call.payload.params.name === 'work_start').at(-1);
-        assert.deepEqual(last.payload.params.arguments, {
+        assert.deepEqual({
+            ...last.payload.params.arguments, task: last.payload.params.arguments.task.split('\\n\\n[AWG delivery policy v1]')[0],
+        }, {
             target: { host: 'my-pc' }, task, title: '行銷分析工具', requestId: 'marketing-scratch-1',
-        }, 'High-level tool must forward the complete task through official work_start without guessing a project');
+        }, 'High-level tool must preserve task parameters while adding the nontechnical delivery and version policy');
+        assert.match(last.payload.params.arguments.task, /commit.*meaningful milestone/i);
 
         const status = await environment.client.request('tools/call', {
             name: 'work_status', arguments: { jobId: 'job-123' },

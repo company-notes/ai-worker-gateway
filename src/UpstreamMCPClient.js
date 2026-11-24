@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { WorkRequestPolicy } from './WorkRequestPolicy.js';
 
 export class UpstreamMCPClient {
     constructor(upstreamURL, token) {
@@ -46,7 +47,7 @@ export class UpstreamMCPClient {
         const response = await fetch(this.upstreamURL, {
             method: 'POST',
             headers,
-            body: JSON.stringify(payload),
+            body: JSON.stringify(WorkRequestPolicy.apply(payload)),
             signal: AbortSignal.timeout(120_000),
         });
         const body = await response.text();
