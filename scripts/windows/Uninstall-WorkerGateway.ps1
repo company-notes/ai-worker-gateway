@@ -17,8 +17,8 @@ Write-Host 'Removed AI Worker Gateway auto-start task. Original T3 and Fleet ser
 
 if ($DeleteLocalSecrets) {
     $stateRoot = Join-Path $env:LOCALAPPDATA 'AIWorkerGateway'
-    Write-Warning 'Deleting local wrapper token/config files. This does not revoke Fleet client tokens; revoke those separately in the original Fleet CLI.'
-    foreach ($name in @('client-token.dpapi', 'upstream-token.dpapi', 'settings.json')) {
+    Write-Warning 'Deleting local wrapper tokens, encrypted notification Webhooks and configuration. This does not revoke Fleet client tokens; revoke those separately in the original Fleet CLI.'
+    foreach ($name in @('client-token.dpapi', 'upstream-token.dpapi', 'notification-storage-key.dpapi', 'assistant-webhooks.enc.json', 'notification-cursor.json', 'settings.json')) {
         $file = Join-Path $stateRoot $name
         if (Test-Path -LiteralPath $file -PathType Leaf) {
             Remove-Item -LiteralPath $file -Force
