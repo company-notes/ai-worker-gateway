@@ -50,11 +50,22 @@ class DeliveryTestEnvironment {
             callTool: async (name, args) => {
                 assert.equal(name, 'work_status');
                 assert.equal(args.jobId, 'abc12345');
-                return { structuredContent: { job: this.job } };
+                return { structuredContent: this.job };
             },
         };
         await this.gateway.listen();
         this.address = 'http://127.0.0.1:' + this.gateway.server.address().port;
+    }
+
+    async requestOpen(jobId = 'abc12345') {
+        const response = await fetch(this.address + '/mcp', {
+            method: 'POST',
+            headers: { authorization: 'Bearer ' + this.config.clientToken, 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: {
+                name: 'worker_delivery_open', arguments: { jobId },
+            } }),
+        });
+        return (await response.json()).result;
     }
 
     async requestLink(jobId = 'abc12345') {
@@ -77,6 +88,28 @@ class DeliveryTestEnvironment {
 const environment = new DeliveryTestEnvironment();
 before(async () => environment.start());
 after(async () => environment.close());
+
+test('the real Fleet work_status is a flat job view; opening Explorer must succeed without an HTTP link', async () => {
+    const result = await environment.requestOpen();
+    assert.equal(result.isError, false);
+    assert.equal(result.structuredContent.opened, true);
+    assert.equal(result.structuredContent.folderPath, await fileSystem.realpath(environment.worktree));
+    assert.ok(result.structuredContent.files.includes('roas-tracker.html'));
+    assert.equal(result.structuredContent.folderPath, await fileSystem.realpath(environment.worktree));
+    assert.deepEqual(environment.opens, Array(3).fill(await fileSystem.realpath(environment.worktree)));
+});
+
+test('artifact folders may be inspected while the worker reports running or waits on delegated work', async () => {
+    environment.job.state = 'running';
+    environment.job.waitingOnDelegatedWork = true;
+    const opened = await environment.requestOpen();
+    assert.equal(opened.isError, false);
+    assert.equal(opened.structuredContent.readyForReview, false);
+    assert.equal(opened.structuredContent.state, 'running');
+    assert.equal(opened.structuredContent.opened, true);
+    environment.job.waitingOnDelegatedWork = false;
+    environment.job.state = 'idle';
+});
 
 test('a completed marketing tool gives a one-click local Explorer link, not a job/worktree instruction', async () => {
     const result = await environment.requestLink();
@@ -103,7 +136,8 @@ test('local folder links reject nonmanaged projects, busy jobs and forged or unk
 
     environment.job.waitingOnDelegatedWork = true;
     const waiting = await environment.requestLink();
-    assert.equal(waiting.isError, true);
+    assert.equal(waiting.isError, false, 'A worktree exists even while the Worker is still busy');
+    assert.equal(waiting.structuredContent.readyForReview, false);
     environment.job.waitingOnDelegatedWork = false;
 
     const guessed = await fetch(environment.address + '/open-delivery/' + 'A'.repeat(32));
@@ -125,6 +159,17 @@ test('a worker checkpoint becomes a saved version only after a real job-branch c
     const forgotten = await environment.requestLink();
     assert.equal(forgotten.structuredContent.versionSaved, false,
         'Files omitted from the Git commit must prevent claiming a fully saved version.');
+});
+
+test('a forged job or unrelated project cannot open a directory', async () => {
+    const countBefore = environment.opens.length;
+    const wrongJob = await environment.requestOpen('notthere12');
+    assert.equal(wrongJob.isError, true);
+    environment.job.projectId = 'unrelated-project';
+    const wrongProject = await environment.requestOpen();
+    assert.equal(wrongProject.isError, true);
+    environment.job.projectId = 'registered-project-1';
+    assert.equal(environment.opens.length, countBefore);
 });
 
 test('an unrelated directory on the same disk must not be accepted as the output workspace', async () => {
