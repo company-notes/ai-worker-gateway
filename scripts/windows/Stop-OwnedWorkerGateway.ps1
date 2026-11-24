@@ -38,10 +38,18 @@ function Assert-OwnedGatewayProcess([int]$processId, [string]$expectedNodePath, 
     }
 
     $fullEntrypoint = [IO.Path]::GetFullPath($expectedEntrypoint)
-    $quotedEntrypoint = [regex]::Escape($fullEntrypoint)
-    $entrypointPattern = '(?:^|\s)(?:"' + $quotedEntrypoint + '"|' + $quotedEntrypoint + ')\s*$'
-    if ([string]$candidate.CommandLine -notmatch $entrypointPattern) {
+    $commandLine = ([string]$candidate.CommandLine).TrimEnd()
+    $quotedEntrypoint = '"' + $fullEntrypoint + '"'
+    $hasQuotedPath = $commandLine.EndsWith($quotedEntrypoint, [StringComparison]::OrdinalIgnoreCase)
+    $hasPlainPath = $commandLine.EndsWith($fullEntrypoint, [StringComparison]::OrdinalIgnoreCase)
+    if (-not $hasQuotedPath -and -not $hasPlainPath) {
         throw 'Port belongs to a different Node script. Refusing to stop an unknown service.'
+    }
+
+    $suffixLength = if ($hasQuotedPath) { $quotedEntrypoint.Length } else { $fullEntrypoint.Length }
+    $prefix = $commandLine.Substring(0, $commandLine.Length - $suffixLength)
+    if ($prefix.Length -eq 0 -or -not [char]::IsWhiteSpace($prefix[$prefix.Length - 1])) {
+        throw 'Node command line does not contain a separate Gateway entrypoint argument.'
     }
 
     $owner = Invoke-CimMethod -InputObject $candidate -MethodName GetOwnerSid -ErrorAction Stop
