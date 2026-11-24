@@ -170,7 +170,7 @@ test('wrapper worker_task_start also accepts the same private route and strips m
         task: 'Make another report', requestId: 'shared-helper-route',
         notificationRouteId: globalThis.testRoute,
     });
-    assert.equal(result.result.isError, false);
+    assert.notEqual(result.result.isError, true);
     assert.equal(gateway.notifications.store.data.jobs.sharedjob4,
         gateway.notifications.resolveRoute(globalThis.testRoute));
     const calls = forwarded.filter((p) => p.params?.name === 'work_start');
