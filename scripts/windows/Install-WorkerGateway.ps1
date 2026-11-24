@@ -422,9 +422,13 @@ if ($provisionEnabled) {
     Write-Host ('Worker-local T3 Project provisioning enabled for host: ' + $ProvisionHost)
     Write-Host ('Approved isolated Workspace root: ' + $WorkspaceRoot)
     if (-not $provisionModelSelection) {
-        Write-Warning 'No provisioning model selected. A new T3 project without a default model cannot start a job until a model is configured.'
+        Write-Host 'Models: Session Router selects a verified model from the Fleet model catalog when needed.'
     }
-    Write-Warning 'The Fleet client token must also have Operate and project visibility for NEW projects. A Pilot-only grant will block dispatch; this installer will not elevate it.'
+    if ($managedFleetGrant) {
+        Write-Host 'Worker dispatch authorization: configured automatically for the selected local host.'
+    } else {
+        Write-Warning 'The manually supplied Fleet credential must permit Operate for newly registered projects.'
+    }
 } elseif (-not $GeneralProject) {
     Write-Warning 'No general-purpose Fleet alias or Worker Provisioning enabled. New unrelated work will be blocked until the operator configures a destination.'
 }
