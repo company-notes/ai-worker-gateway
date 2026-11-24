@@ -16,6 +16,9 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     assert.match(source, /如果這個 Bot 的 Gateway MCP 沒有啟用/);
     assert.match(source, /絕對不要問一般使用者「要不要 Commit？」/);
     assert.match(source, /worker_delivery_link/);
+    assert.match(source, /worker_delivery_open/);
+    assert.match(source, /folderPath/);
+    assert.match(source, /不要把取得 HTTP URL 當成必要步驟/);
     assert.match(source, /worker_notification_status/);
     assert.match(source, /worker_notification_setup/);
     assert.match(source, /worker_notification_decline/);

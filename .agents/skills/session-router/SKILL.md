@@ -1,6 +1,6 @@
 ---
 name: session-router
-description: 當使用者交辦工具、網站、行銷分析、報告或修改工作時，透過 AI Worker Gateway MCP 路由派工。需要自動通知時，助理與 Webhook 配對取得私有 notificationRouteId，在未來派工時帶上該識別碼；不同助理共用同一 MCP 連線和金鑰也能分流。完成後交付可點擊資料夾並自動保存 Git 版本，不要求使用者理解 Job ID。
+description: 當使用者交辦工具、網站、行銷分析、報告或修改工作時，透過 AI Worker Gateway MCP 路由派工。需要自動通知時，助理與 Webhook 配對取得私有 notificationRouteId，在未來派工時帶上該識別碼；不同助理共用同一 MCP 連線和金鑰也能分流。完成後直接開啟 Windows 成果資料夾並回傳實際路徑並自動保存 Git 版本，不要求使用者理解 Job ID。
 ---
 
 # Session Router — Gateway-neutral work routing
@@ -19,7 +19,7 @@ description: 當使用者交辦工具、網站、行銷分析、報告或修改�
 
 - **派工時**：只說「已開始處理『行銷成效追蹤工具』」，有已成功設定的背景通知才說「完成後會通知你」。不以 Job ID、Host、Workspace、branch、worktree、Commit ID、T3 thread URL 等識別碼充當主回覆；全部留給系統內部追蹤，只有使用者明確要技術細節才提供。
 - **完成時**：用人話說明做好什麼、測了什麼、還缺什麼；給出成果檔案名稱，以及 **[查看成果資料夾]** 等清楚的可點連結。不要丟出只有 Windows 路徑的天書，更不要讓使用者自己查 Git worktree。
-- **直接開資料夾**：查實際工作 `work_status`，待完成且交付物已核對後，若單一 3791 MCP 提供 `worker_delivery_link`，用真的 Job ID 呼叫它，將回傳的 `url` 做成 Markdown **[查看成果資料夾](url)**。使用者點擊後會在**同一台 Windows Worker 電腦**開啟 Explorer。網址是短期、一次性連結；過期時重新呼叫工具產生新連結。不要假造 `file://` 或 Windows 檔案連結，也不要把內部資料夾任意映射成公開 HTTP 網站。
+- **直接開資料夾（優先，不用網址）**：從原版 `work_status` 查真實工作，使用 3791 MCP 的 `worker_delivery_open({jobId})` 直接在 Windows Worker 本機啟動 Explorer，回傳經 Gateway 核對的**真實絕對資料夾位置 `folderPath`**和檔名。使用者看到的是「已為你打開成果資料夾」，並可複製實際 Windows 路徑；若目前是 `running` 或正在等待其他工作，仍可先查看存在的檔案，但不能稱整份工作已完成。**不要為了交付資料夾等到工作 `idle`；不要把取得 HTTP URL 當成必要步驟。** 如助理使用的平台需要使用者自己點選，才呼叫 `worker_delivery_link`，它也會回傳 `folderPath` 與備用的本機一次性連結；網址只是用來觸發 Explorer，不代表檔案存放在網站上。若 `worker_delivery_open` 因桌面工作階段無法啟動而失敗，可以呼叫 `worker_delivery_link` 取得路徑及備用連結；不要重試三次後仍只回報「拿不到連結」，更不要讓使用者自行猜 Worktree。任何工具失敗時說明真實阻斷，不可捏造路徑。
 - **Git 預設自動保存**：讓 Worker 在有 Git 的執行環境中，每完成一段可驗證的成果就安全 Commit 一次，最終交付前也要完成 Commit；只提交本次工作實際修改的檔案，不覆蓋或混入其他未完成變更。不 Push、不 Merge、不改 main，除非使用者明確交辦。**絕對不要問一般使用者「要不要 Commit？」** 使用者不滿意時繼續修改、再保存新版本。如果沒有 Git 或 Commit 失敗，就如實說明，不假稱版本已保存。
 
 ## 完成通知：一個共用 MCP、每位助理自己的 Webhook 配對
@@ -48,7 +48,7 @@ description: 當使用者交辦工具、網站、行銷分析、報告或修改�
 4. 對獨立新工作，檢查 fleet_status、fleet_projects 或同等 Workspace 發現能力，選擇**適合任務且已授權**的執行目的地。新話題不必然建立新的 Project；已有適當 Workspace 時，在同一 Workspace 開新的 Job。
 5. 如果找不到合適的執行空間，先檢查 Gateway 是否提供且管理員已啟用 `worker_workspace_ensure`（或等價的受控 Workspace Provisioning）。若有，為這個獨立工作取穩定且具區辨性的英文小寫 slug，呼叫 `worker_workspace_ensure({name, requestId, title?})`；若新專案尚無已核准的預設模型，先讀 `fleet_models` 選擇精確的 Provider／模型，作為 `worker_workspace_ensure` 的 `modelSelection`；Gateway 會驗證模型與選項。只有回傳 `dispatchReady: true`，才使用回傳的 `target` 與可選 `modelSelection` 派工。`worker_workspace_prepare` 只建立資料夾，不能作為已註冊 Project。若缺少 Host、模型、Fleet 的新專案權限、Git 或註冊能力，明確回報阻斷；不能暗中落到 Pilot、無關客戶 Project 或任意 Scratch。
 6. 確認合法目的地之後，透過 Gateway 呼叫 `work_start` 或 `worker_task_start`，傳入完整工作、可驗收成果、限制和唯一 requestId。**如果這位助理已完成 Webhook 配對且使用者選擇開啟通知，把私有 `notificationRouteId` 當成此新 Job 的參數一併傳入**；未配對就不傳，不能使用共享 MCP 金鑰或助理名字猜測通知目的地。Gateway 會先驗證並移除通知參數，再交給原版 Fleet。除非使用者明確另有要求，Worker 應在每個完成階段安全保存 Git 版本；發生不確定回覆時重試必須使用**同一 requestId 和相同參數**。
-7. 拿到真正的 Job ID 後，確認**本 Job 已經在派工時完成通知路由綁定**，才可以說「這個工作結束會通知你」；沒綁定就如實說明此次需手動查進度。用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆、實際交付物與是否已保存 Git 版本；未保存且可以續作時由助理請 Worker 在原工作安全完成 Commit，不要請一般使用者決定。成果確認後呼叫 worker_delivery_link（若可用）產生真正可點擊的 Explorer 連結。需核准或輸入時如實回報，不得假稱自動完成。
+7. 拿到真正的 Job ID 後，確認**本 Job 已經在派工時完成通知路由綁定**，才可以說「這個工作結束會通知你」；沒綁定就如實說明此次需手動查進度。用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆、實際交付物與是否已保存 Git 版本；未保存且可以續作時由助理請 Worker 在原工作安全完成 Commit，不要請一般使用者決定。先使用 `worker_delivery_open`（若可用）直接打開已驗證的本機資料夾並回報 `folderPath`；只有需要可點擊開啟時才使用 `worker_delivery_link` 當備用。資料夾可查看不代表已驗收完成；檔案要獨立查核，不要因交付入口暫時異常就停止交付已驗證的內容。需核准或輸入時如實回報，不得假稱自動完成。
 8. 若要跨不同 Worker 或公司團隊交接，依正式工作系統與成果路徑移交；不要假設兩台機器可以共享同一個底層 Thread。
 
 ## 可選 Gateway 快捷工具
