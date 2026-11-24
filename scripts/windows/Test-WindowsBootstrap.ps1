@@ -143,6 +143,14 @@ try {
     $fixtureProcessInfo = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = " + $gatewayProcess.Id)
     Write-Host ('Fixture Node command-line for compatibility test: ' + [string]$fixtureProcessInfo.CommandLine)
     Write-Host ('Fixture expected entrypoint: ' + $entrypoint)
+    $fixtureFullPath = [IO.Path]::GetFullPath($entrypoint)
+    $fixtureCommandLine = ([string]$fixtureProcessInfo.CommandLine).TrimEnd()
+    $suffix = '"' + $fixtureFullPath + '"'
+    Write-Host ('Fixture normalized entrypoint: ' + $fixtureFullPath)
+    Write-Host ('Fixture quoted suffix matches: ' + $fixtureCommandLine.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase))
+    Write-Host ('Fixture actual listening PID: ' + ((@($gatewayListeners | Select-Object -ExpandProperty OwningProcess -Unique)) -join ','))
+    Write-Host ('Fixture intended PID: ' + $gatewayProcess.Id)
+
     & $stopScript -NodePath $node -Entrypoint $entrypoint -ListenPort $gatewayPort | Out-Null
     if (-not $gatewayProcess.WaitForExit(5000)) {
         throw 'Stopping the installer-owned Gateway must also terminate its listening Node process.'
