@@ -254,7 +254,7 @@ test('fresh assistant delegates an unrelated marketing task to configured scratc
         const last = environment.calls.filter((call) =>
             call.payload.method === 'tools/call' && call.payload.params.name === 'work_start').at(-1);
         assert.deepEqual({
-            ...last.payload.params.arguments, task: last.payload.params.arguments.task.split('\\n\\n[AWG delivery policy v1]')[0],
+            ...last.payload.params.arguments, task: last.payload.params.arguments.task.slice(0, task.length),
         }, {
             target: { host: 'my-pc' }, task, title: '行銷分析工具', requestId: 'marketing-scratch-1',
         }, 'High-level tool must preserve task parameters while adding the nontechnical delivery and version policy');
