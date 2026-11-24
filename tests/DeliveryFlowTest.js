@@ -171,6 +171,42 @@ test('a forged job or unrelated project cannot open a directory', async () => {
     assert.equal(environment.opens.length, countBefore);
 });
 
+test('Explorer failing to launch still returns the verified absolute directory instead of blocking delivery', async () => {
+    const oldOpener = environment.gateway.deliveries.openFolder;
+    environment.gateway.deliveries.openFolder = async () => {
+        throw new Error('No interactive desktop');
+    };
+    try {
+        const result = await environment.requestOpen();
+        assert.equal(result.isError, false);
+        assert.equal(result.structuredContent.opened, false);
+        assert.equal(result.structuredContent.folderPath, await fileSystem.realpath(environment.worktree));
+        assert.match(result.structuredContent.openError, /Explorer/);
+    } finally {
+        environment.gateway.deliveries.openFolder = oldOpener;
+    }
+});
+
+test('unavailable Git version verification must not hide the actual deliverable folder', async () => {
+    const oldGit = environment.gateway.deliveries.runGit;
+    environment.gateway.deliveries.runGit = async (cwd, args) => {
+        if (args[0] === 'rev-list') {
+            throw new Error('Missing main branch');
+        }
+        return oldGit(cwd, args);
+    };
+    try {
+        const result = await environment.requestOpen();
+        assert.equal(result.isError, false);
+        assert.equal(result.structuredContent.versionSaved, null);
+        assert.equal(result.structuredContent.needsVersionSave, false,
+            'Unknown version status must not be incorrectly declared unsaved.');
+        assert.equal(result.structuredContent.folderPath, await fileSystem.realpath(environment.worktree));
+    } finally {
+        environment.gateway.deliveries.runGit = oldGit;
+    }
+});
+
 test('an unrelated directory on the same disk must not be accepted as the output workspace', async () => {
     environment.job.branch = 'fleet/not-this-job';
     const response = await environment.requestLink();

@@ -205,8 +205,17 @@ export class DeliveryService {
 
     async openFor(args) {
         const result = await this._inspectResult(args);
-        await this.openFolder(result.folder);
-        return { ...result.summary, opened: true };
+        try {
+            await this.openFolder(result.folder);
+            return { ...result.summary, opened: true };
+        } catch {
+            // A Scheduled Task may not have an interactive desktop; do not lose
+            // the real verified path just because explorer.exe cannot be shown.
+            return {
+                ...result.summary, opened: false,
+                openError: 'Windows Explorer could not be opened in this desktop session. Use folderPath directly.',
+            };
+        }
     }
 
     async linkFor(args, listenPort) {
