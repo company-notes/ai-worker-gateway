@@ -26,6 +26,15 @@ foreach ($file in $scripts) {
     }
 }
 
+# Regression: a real user upgrading an existing install already has settings.json.
+# Under StrictMode the installer must load it before choosing the local host.
+$installerSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Install-WorkerGateway.ps1') -Raw -Encoding UTF8
+$existingRead = $installerSource.IndexOf('if (-not $ProvisionHost -and $null -ne $existing', [StringComparison]::Ordinal)
+$existingInit = $installerSource.IndexOf('$existing = $null', [StringComparison]::Ordinal)
+if ($existingRead -lt 0 -or $existingInit -lt 0 -or $existingInit -ge $existingRead) {
+    throw 'Upgrade regression: existing settings must be initialized before they are read for host selection under StrictMode.'
+}
+
 $settingsPath = Join-Path $env:LOCALAPPDATA 'AIWorkerGateway\settings.json'
 $existedBefore = Test-Path -LiteralPath $settingsPath
 $plan = & (Join-Path $PSScriptRoot 'Install-WorkerGateway.ps1') -PlanOnly
