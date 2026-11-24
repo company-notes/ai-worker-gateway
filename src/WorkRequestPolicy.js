@@ -3,7 +3,7 @@ const directive = [
     '',
     '',
     marker,
-    'For a Git repository, commit your own verified deliverable changes at each completed meaningful milestone and at final handoff.',
+    'Unless the user explicitly requests no commits, for a Git repository commit your own verified deliverable changes at each completed meaningful milestone and at final handoff.',
     'Stage only files you intentionally changed. Do not overwrite, reset, commit or discard unrelated existing changes.',
     'Do not ask the user whether to commit. Do not push or merge branches unless the user specifically requests that.',
     'If this is a non-Git workspace or Git commit fails, explain the limitation in your work result; do not pretend a version was saved.',

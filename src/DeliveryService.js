@@ -158,7 +158,11 @@ export class DeliveryService {
 
         const outstandingChanges = await this.runGit(folder, ['status', '--porcelain', '--untracked-files=all']);
         const finishedCommits = Number(await this.runGit(folder, ['rev-list', '--count', 'main..HEAD']));
-        const versionSaved = !outstandingChanges && Number.isInteger(finishedCommits) && finishedCommits > 0;
+        const trackedFiles = new Set((await this.runGit(folder, [
+            '-c', 'core.quotePath=false', 'ls-files', '-z',
+        ])).split('\0'));
+        const versionSaved = !outstandingChanges && Number.isInteger(finishedCommits) &&
+            finishedCommits > 0 && files.length > 0 && files.every((file) => trackedFiles.has(file));
 
         const token = randomBytes(24).toString('base64url');
         const now = Date.now();

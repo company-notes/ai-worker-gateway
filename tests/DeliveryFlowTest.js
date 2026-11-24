@@ -120,6 +120,11 @@ test('a worker checkpoint becomes a saved version only after a real job-branch c
     const response = await environment.requestLink();
     assert.equal(response.structuredContent.versionSaved, true);
     assert.equal(response.structuredContent.needsVersionSave, false);
+
+    await fileSystem.writeFile(path.join(environment.worktree, 'generated.html'), 'Untracked output');
+    const forgotten = await environment.requestLink();
+    assert.equal(forgotten.structuredContent.versionSaved, false,
+        'Files omitted from the Git commit must prevent claiming a fully saved version.');
 });
 
 test('an unrelated directory on the same disk must not be accepted as the output workspace', async () => {

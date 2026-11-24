@@ -153,7 +153,11 @@ export class WorkerGateway {
             const message = JSON.parse(upstreamResponse.body);
             if (message.result && typeof message.result === 'object') {
                 const guide = 'Follow the installed Session Router Skill for intent routing: first identify existing jobs, distinguish follow-ups from independent new work, and select a suitable authorized workspace. The gateway offers fleet_status, work_list, work_start, work_continue and optional worker_task_plan / worker_task_start helpers. If no suitable workspace exists, use worker_workspace_ensure only when the operator has enabled safe T3 provisioning; it returns a Fleet target and optional modelSelection when dispatchReady is true. A shortcut does not replace the Session Router routing policy. If no authorized workspace is available, report the missing capability instead of silently using an unrelated Pilot project.';
-                message.result.instructions = [message.result.instructions, guide].filter(Boolean).join('\n\n');
+                message.result.instructions = [
+                    message.result.instructions,
+                    guide,
+                    'User-facing delivery rule: hide internal job IDs, branches, worktrees and commit details unless asked. The Worker should commit each verified meaningful stage automatically and save a final Git version without asking the user to approve a Commit. When work_status says idle, verify the actual output and call worker_delivery_link to get a clickable one-time Explorer folder URL and the real versionSaved flag. On Windows, this gateway can show a background desktop notification. To notify within OpenMausBot chat, the Bot must actually create and enable one background work_feed Routine; never promise a chat notification without an active routine.',
+                ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
         }
