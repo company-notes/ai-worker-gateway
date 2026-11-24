@@ -65,7 +65,9 @@ export class JobNotificationService {
                 ? 'This assistant connection already has a reusable webhook.'
                 : profile.preference === 'off'
                     ? 'User declined automatic notifications; ask for progress manually.'
-                    : 'Ask the user once whether they want automatic task notifications.',
+                    : profile.preference === 'pending'
+                        ? 'The user opted in but has not completed the local webhook form. Do not send notifications; provide a fresh setup link on request and let the user ask for progress.'
+                        : 'Ask the user once whether they want automatic task notifications.',
         };
     }
 
@@ -74,7 +76,7 @@ export class JobNotificationService {
         return this.status(profileId);
     }
 
-    setup(profileId, port) {
+    async setup(profileId, port) {
         if (!this.store.active || !this.store.profileFor(profileId)) {
             throw new Error('Gateway webhook storage is not available.');
         }
@@ -87,6 +89,9 @@ export class JobNotificationService {
         }
         if (this.tickets.size >= 50) {
             throw new Error('Too many unused notification setup links.');
+        }
+        if (this.store.profileFor(profileId).preference !== 'on') {
+            await this.store.setPreference(profileId, 'pending');
         }
         this.tickets.set(nonce, { profileId, expiresAt: now + setupTtlMs });
         return {

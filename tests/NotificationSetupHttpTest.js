@@ -80,6 +80,9 @@ test('unconfigured bot offers one local setup link and accepts only same-origin 
     assert.equal(state.body.result.structuredContent.enabled, false);
 
     const setup = await call('worker_notification_setup');
+    const pending = await call('worker_notification_status');
+    assert.equal(pending.body.result.structuredContent.preference, 'pending',
+        'An unanswered setup form must not cause the assistant to ask for notification consent every time.');
     const url = setup.body.result.structuredContent.url;
     assert.ok(url.startsWith(address + '/notifications/setup/'));
     const page = await fetch(url);

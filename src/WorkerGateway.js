@@ -123,7 +123,7 @@ export class WorkerGateway {
                 const value = name === 'worker_notification_status'
                     ? this.notifications.status(assistantId)
                     : name === 'worker_notification_setup'
-                        ? this.notifications.setup(assistantId, this.server.address().port)
+                        ? await this.notifications.setup(assistantId, this.server.address().port)
                         : await this.notifications.decline(assistantId);
                 return this._extensionResult(payload.id, {
                     content: [{ type: 'text', text: JSON.stringify(value) }],

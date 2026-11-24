@@ -128,7 +128,7 @@ export class NotificationStore {
     }
 
     async setPreference(id, preference) {
-        if (preference !== 'off' && preference !== 'unset') {
+        if (!['off', 'unset', 'pending'].includes(preference)) {
             throw new Error('Invalid notification preference.');
         }
         await this.change((state) => {
