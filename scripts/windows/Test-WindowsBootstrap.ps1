@@ -12,7 +12,8 @@ $scripts = @(
     'Get-WorkerGatewayStatus.ps1',
     'Show-WorkerGatewayClientToken.ps1',
     'Uninstall-WorkerGateway.ps1',
-    'Register-T3Project.ps1'
+    'Register-T3Project.ps1',
+    'New-ManagedFleetGrant.ps1'
 )
 
 foreach ($file in $scripts) {
@@ -50,5 +51,35 @@ $secret = ConvertTo-SecureString -String 'local-bootstrap-dpapi-test-0123456789'
 $cipher = ConvertFrom-SecureString -SecureString $secret
 $roundTrip = ConvertTo-SecureString -String $cipher
 if ($roundTrip.Length -ne $secret.Length) { throw 'Windows user DPAPI round trip failed.' }
+
+# A real, isolated process exercises the original Fleet CLI's stdout contract.
+# No production gateway, T3 service, token, or database is touched.
+$fixture = Join-Path $env:TEMP ('awg-managed-grant-test-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+try {
+    $mockCli = Join-Path $fixture 'mock-fleet.cjs'
+    $mock = @'
+const args = process.argv.slice(2);
+if (args.join(' ') !== 'clients token --name ai-worker-gateway --access operate --hosts my-pc --ttl 1y') {
+    process.stderr.write('Unexpected test command');
+    process.exit(8);
+}
+process.stdout.write('Created client 12345678-1234-1234-1234-123456789012 ("ai-worker-gateway", operate access to my-pc). Its token expires in 1y:\n');
+process.stdout.write('private-test-grant-0123456789012345678901234\n');
+process.stdout.write('This is the only time the token is shown.\n');
+process.stdout.write('Token ID: abc\n');
+'@
+    [IO.File]::WriteAllText($mockCli, $mock, (New-Object Text.UTF8Encoding($false)))
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    $grant = & (Join-Path $PSScriptRoot 'New-ManagedFleetGrant.ps1') -NodePath $node -FleetCliPath $mockCli -HostId 'my-pc'
+    if ($null -eq $grant -or $null -eq $grant.secret -or $grant.secret.Length -lt 24) {
+        throw 'Installer must produce an encrypted-only in-memory managed operate credential.'
+    }
+    if ($grant.clientId -ne '12345678-1234-1234-1234-123456789012') {
+        throw 'Installer must retain the managed client ID for lifecycle management.'
+    }
+} finally {
+    Remove-Item -LiteralPath $fixture -Force -Recurse -ErrorAction SilentlyContinue
+}
 
 Write-Host 'Windows bootstrap parser, PlanOnly and DPAPI tests passed.'
