@@ -238,13 +238,15 @@ export class WorkerGateway {
         if (!Array.isArray(message.result?.tools)) {
             return upstreamResponse;
         }
-        // The original Fleet rejects unknown fields. Only the wrapper understands this
-        // metadata, so advertise it to assistants and strip it before forwarding.
+        // This is Gateway-only routing metadata; the original Fleet never sees it.
         const workStartTool = message.result.tools.find((tool) => tool.name === 'work_start');
         if (workStartTool?.inputSchema?.properties) {
             workStartTool.inputSchema.properties.notificationRouteId = {
-                type: 'string',
-                pattern: '^[a-f0-9]{64}
+                type: 'string', pattern: '^[a-f0-9]{64}$',
+                description: 'Optional private route handle returned by worker_notification_pairing_status. The Gateway strips it before calling Fleet.',
+            };
+        }
+        const occupiedNames = new Set(message.result.tools.map((tool) => tool.name));
         for (const extension of this._extensionTools()) {
             if (occupiedNames.has(extension.name)) {
                 throw new Error(`Upstream tool name collides with extension: ${extension.name}`);
