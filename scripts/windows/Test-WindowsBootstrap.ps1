@@ -69,7 +69,7 @@ if (args.join(' ') !== 'clients token --name ai-worker-gateway --access operate 
     process.stderr.write('Unexpected test command');
     process.exit(8);
 }
-process.stdout.write('Created client 12345678-1234-1234-1234-123456789012 ("ai-worker-gateway", operate access to my-pc). Its token expires in 1y:\n');
+process.stdout.write('Created client 12345678-1234-1234-1234-123456789012 ("ai-worker-gateway", operate access to host my-pc only). Its token expires in 1y:\n');
 process.stdout.write('private-test-grant-0123456789012345678901234\n');
 process.stdout.write('This is the only time the token is shown.\n');
 process.stdout.write('Token ID: abc\n');
