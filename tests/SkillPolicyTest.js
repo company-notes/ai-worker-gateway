@@ -20,7 +20,11 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     assert.match(source, /worker_notification_setup/);
     assert.match(source, /worker_notification_decline/);
     assert.match(source, /不要自行預設同意/);
-    assert.match(source, /每個助理的 3791 MCP 連線要有自己唯一的一把金鑰/);
+    assert.match(source, /同一把 MCP 金鑰.*分流/);
+    assert.match(source, /worker_notification_pairing_status/);
+    assert.match(source, /通知已開啟時.*notificationRouteId/);
+    assert.match(source, /原版 Fleet.*前移除此欄位/);
+    assert.doesNotMatch(source, /每個助理的 3791 MCP 連線要有自己唯一的一把金鑰/);
     assert.doesNotMatch(source, /OpenMausBot.*Routine|Windows 桌面顯示通知.*Windows桌面提醒/);
     assert.match(source, /不以 Job ID、Host、Workspace/);
 });
