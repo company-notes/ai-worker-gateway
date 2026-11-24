@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promises as fileSystem } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +54,7 @@ export class JobNotificationService {
 
     async _saveCursor(cursor) {
         const file = path.join(this.stateDirectory, 'notification-cursor.json');
-        const temporary = file + '.tmp-' + process.pid;
+        const temporary = file + '.tmp-' + randomUUID();
         await fileSystem.writeFile(temporary, JSON.stringify({ cursor }) + '\n', { mode: 0o600, flag: 'wx' });
         try {
             await fileSystem.rename(temporary, file);

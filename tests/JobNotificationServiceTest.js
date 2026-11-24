@@ -8,6 +8,7 @@ import { JobNotificationService } from '../src/JobNotificationService.js';
 test('after job dispatch, a background feed sends one user-friendly notification without polling the chat', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'awg-notification-test-'));
     const messages = [];
+    let nextCursor = '1';
     let events = [
         { type: 'state_changed', jobId: 'oldjob11', toState: 'idle' },
     ];
@@ -15,7 +16,7 @@ test('after job dispatch, a background feed sends one user-friendly notification
         async callTool(name, args) {
             if (name === 'work_feed') {
                 assert.equal(args.mine, true, 'Only this client’s jobs should notify the user');
-                return { structuredContent: { events, nextCursor: events.length > 1 ? '3' : '1', hasMore: false } };
+                return { structuredContent: { events, nextCursor, hasMore: false } };
             }
             if (name === 'work_status') {
                 return { structuredContent: { job: {
@@ -32,6 +33,7 @@ test('after job dispatch, a background feed sends one user-friendly notification
     try {
         await service.poll();
         assert.equal(messages.length, 0, 'First start must not spam old jobs');
+        nextCursor = '3';
         events = [
             { type: 'state_changed', jobId: 'newjob22', toState: 'idle' },
             { type: 'state_changed', jobId: 'newjob22', toState: 'idle' },
@@ -45,7 +47,7 @@ test('after job dispatch, a background feed sends one user-friendly notification
         events = [];
         await restart.poll();
         assert.equal(messages.length, 1, 'Stored feed position must survive an app restart');
-        assert.equal(JSON.parse(await readFile(path.join(directory, 'notification-cursor.json'), 'utf8')).cursor, '1');
+        assert.equal(JSON.parse(await readFile(path.join(directory, 'notification-cursor.json'), 'utf8')).cursor, '3');
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

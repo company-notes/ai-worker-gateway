@@ -14,6 +14,7 @@ $scripts = @(
     'Uninstall-WorkerGateway.ps1',
     'Register-T3Project.ps1',
     'New-ManagedFleetGrant.ps1',
+    'Notify-WorkerResult.ps1',
     'Stop-OwnedWorkerGateway.ps1'
 )
 

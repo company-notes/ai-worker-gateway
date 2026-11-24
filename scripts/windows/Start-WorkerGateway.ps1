@@ -36,6 +36,7 @@ $env:AWG_UPSTREAM_TOKEN = Read-ClientSecret (Join-Path $stateRoot 'upstream-toke
 $env:AWG_UPSTREAM_MCP_URL = [string]$settings.upstreamURL
 $env:AWG_LISTEN_HOST = [string]$settings.listenHost
 $env:AWG_LISTEN_PORT = [string]$settings.listenPort
+$env:AWG_NOTIFICATION_STATE_DIR = $stateRoot
 
 Remove-Item Env:AWG_WORKSPACE_ROOT -ErrorAction SilentlyContinue
 Remove-Item Env:AWG_GENERAL_PROJECT -ErrorAction SilentlyContinue

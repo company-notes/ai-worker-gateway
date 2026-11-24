@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import path from 'node:path';
 import { ModelSelectionPolicy } from './ModelSelectionPolicy.js';
 
 export class WorkerConfig {
@@ -12,6 +13,7 @@ export class WorkerConfig {
         const generalProject = environment.AWG_GENERAL_PROJECT ?? null;
         const provisionHost = environment.AWG_PROVISION_HOST ?? null;
         const selectionJSON = environment.AWG_PROVISION_MODEL_SELECTION ?? null;
+        const notificationStateDirectory = environment.AWG_NOTIFICATION_STATE_DIR ?? null;
 
         if (listenHost !== '127.0.0.1' && listenHost !== '::1') {
             throw new Error('AWG_LISTEN_HOST must be loopback; public access is not supported');
@@ -49,6 +51,9 @@ export class WorkerConfig {
         }
 
         const provisionModelSelection = selectionJSON === null ? null : ModelSelectionPolicy.fromJSON(selectionJSON);
+        if (notificationStateDirectory !== null && !path.isAbsolute(notificationStateDirectory)) {
+            throw new Error('AWG_NOTIFICATION_STATE_DIR must be an absolute local directory');
+        }
 
         if (workspaceRoot !== null && workspaceRoot.trim() === '') {
             throw new Error('AWG_WORKSPACE_ROOT cannot be empty');
@@ -67,6 +72,7 @@ export class WorkerConfig {
             generalProject,
             provisionHost,
             provisionModelSelection,
+            notificationStateDirectory,
         });
     }
 

@@ -5,6 +5,7 @@ import { WorkspaceService } from './WorkspaceService.js';
 import { TaskDispatchService } from './TaskDispatchService.js';
 import { WorkspaceProvisionService } from './WorkspaceProvisionService.js';
 import { DeliveryService } from './DeliveryService.js';
+import { JobNotificationService } from './JobNotificationService.js';
 
 export class WorkerGateway {
     constructor(config, services = {}) {
@@ -14,6 +15,7 @@ export class WorkerGateway {
         this.taskDispatch = new TaskDispatchService(this.upstream, config.generalProject);
         this.provision = new WorkspaceProvisionService(config, this.workspaces, this.upstream, services.projectAdapter);
         this.deliveries = new DeliveryService(config, this.upstream, { openFolder: services.openFolder });
+        this.notifications = new JobNotificationService(config, this.upstream, { notify: services.notify });
         this.server = createServer((request, response) => {
             this._handleRequest(request, response).catch((error) => {
                 console.error('Worker Gateway request failed:', error.message);
@@ -250,10 +252,12 @@ export class WorkerGateway {
             this.server.listen(this.config.listenPort, this.config.listenHost, resolve);
         });
 
+        this.notifications.start();
         return this.server.address();
     }
 
     async close() {
+        this.notifications.close();
         await new Promise((resolve, reject) => this.server.close((error) => error ? reject(error) : resolve()));
     }
 }
