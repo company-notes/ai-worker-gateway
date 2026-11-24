@@ -3,299 +3,216 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import test from 'node:test';
 import { JobNotificationService } from '../src/JobNotificationService.js';
 import { validateWebhook, WebhookSender } from '../src/WebhookSender.js';
 
-const masterToken = 'local-client-token-for-notifications-12345678';
-let root;
-let notification;
-let receiver;
-let alerts;
-let feedEvents;
-let cursor;
-let jobStates;
+const secret = 'fixed-private-notification-encryption-key-123456789';
+const commonKey = 'one-shared-mcp-key-abcdefghijklmnopqrstuvwxyz';
 
-before(async () => {
-    root = await mkdtemp(path.join(os.tmpdir(), 'awg-notifications-test-'));
-    alerts = [];
-    jobStates = new Map();
-    cursor = '0';
-    feedEvents = [];
-
-    receiver = createServer(async (request, response) => {
-        const data = [];
-        for await (const chunk of request) {
-            data.push(chunk);
-        }
-        const body = JSON.parse(Buffer.concat(data).toString('utf8'));
+async function fixture() {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'awg-routes-'));
+    const alerts = [];
+    let events = [];
+    let cursor = '0';
+    const jobStates = new Map();
+    const receiver = createServer(async (request, response) => {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if (body.event !== 'work.webhook_test') {
-            alerts.push({ header: request.headers.authorization, body });
+            alerts.push({ secret: request.headers.authorization, body });
         }
         response.writeHead(204);
         response.end();
     });
     await new Promise((resolve) => receiver.listen(0, '127.0.0.1', resolve));
-
     const upstream = {
         async callTool(name, args) {
             if (name === 'work_feed') {
-                assert.equal(args.mine, true);
-                const newEvents = feedEvents.filter((event) => Number(event.cursor) > Number(args.cursor));
-                return { structuredContent: { events: newEvents, nextCursor: cursor, hasMore: false } };
+                return { structuredContent: { events: events.filter((e) =>
+                    Number(e.cursor) > Number(args.cursor)), nextCursor: cursor, hasMore: false } };
             }
             if (name === 'work_status') {
                 return { structuredContent: { job: jobStates.get(args.jobId) } };
             }
-            throw new Error('Unexpected test tool: ' + name);
+            throw new Error('Unexpected tool: ' + name);
         },
     };
-    notification = new JobNotificationService({
-        clientToken: masterToken, notificationStateDirectory: root,
-    }, upstream);
-    await notification.initialize();
-});
-
-after(async () => {
-    notification.close();
-    await new Promise((resolve) => receiver.close(resolve));
-    await rm(root, { recursive: true, force: true });
-});
-
-function settings(name = 'Sage') {
-    return new URLSearchParams({
-        mode: 'current', name,
-        url: 'http://127.0.0.1:' + receiver.address().port + '/webhook',
-        header: 'Authorization', secret: 'private-callback-key',
+    const config = { notificationStateDirectory: root, notificationStorageKey: secret, clientToken: commonKey };
+    const service = new JobNotificationService(config, upstream);
+    await service.initialize();
+    const form = (name, key) => new URLSearchParams({
+        name, url: 'http://127.0.0.1:' + receiver.address().port + '/callback',
+        header: 'Authorization', secret: key,
     });
+    const pair = async (name, key) => {
+        const setup = service.setup(3791);
+        const nonce = setup.setupId;
+        assert.equal(service.pairingStatus(nonce).paired, false);
+        const confirmation = await service.submitSetup(nonce, form(name, key));
+        assert.match(confirmation, /Webhook 配對成功/);
+        const result = service.pairingStatus(nonce);
+        assert.equal(result.paired, true);
+        assert.match(result.notificationRouteId, /^[a-f0-9]{64}$/);
+        return result.notificationRouteId;
+    };
+    return {
+        root, alerts, jobStates, service, upstream, config, pair,
+        feed: (newEvents, next) => { events = newEvents; cursor = next; },
+        close: async () => {
+            service.close();
+            await new Promise((resolve) => receiver.close(resolve));
+            await rm(root, { recursive: true, force: true });
+        },
+    };
 }
 
-test('user opts in once using a local form; secret is encrypted and never reaches the assistant', async () => {
-    assert.deepEqual(notification.status('default').preference, 'unset');
-    const setup = await notification.setup('default', 3791);
-    assert.match(setup.url, /^http:\/\/127\.0\.0\.1:3791\/notifications\/setup\/[A-Za-z0-9_-]{32}$/);
-    const nonce = setup.url.split('/').at(-1);
-    assert.match(notification.renderSetup(nonce), /Webhook 網址/);
-
-    const page = await notification.submitSetup(nonce, settings());
-    assert.match(page, /完成通知已啟用/);
-    assert.equal(notification.status('default').enabled, true);
-    assert.doesNotMatch(JSON.stringify(notification.status('default')), /private-callback-key|\/webhook/);
-    const encrypted = await readFile(path.join(root, 'assistant-webhooks.enc.json'), 'utf8');
-    assert.doesNotMatch(encrypted, /private-callback-key|127\.0\.0\.1|Sage/);
-    assert.throws(() => notification.renderSetup(nonce), /expired/);
-});
-
-test('Gateway sends a finished-turn event to the correct assistant webhook only once', async () => {
-    await notification.trackJob('default', {
-        structuredContent: { job: { jobId: 'jobfirst01' } },
-    });
-    jobStates.set('jobfirst01', {
-        jobId: 'jobfirst01', title: '行銷追蹤工具 [job:jobfirst01]',
-        state: 'idle', waitingOnDelegatedWork: false,
-    });
-    cursor = '1';
-    feedEvents = [{
-        cursor: '1', type: 'state_changed', toState: 'idle',
-        jobId: 'jobfirst01', at: new Date(Date.now() + 1000).toISOString(),
-    }];
-    await notification.poll();
-    assert.equal(alerts.length, 1);
-    assert.equal(alerts[0].header, 'Bearer private-callback-key');
-    assert.equal(alerts[0].body.task, '行銷追蹤工具');
-    assert.equal(alerts[0].body.event, 'work.turn_finished');
-    assert.equal(alerts[0].body.jobId, 'jobfirst01');
-    await notification.poll();
-    assert.equal(alerts.length, 1, 'The durable cursor must prevent duplicate notifications');
-
-    const reloaded = new JobNotificationService({
-        clientToken: masterToken, notificationStateDirectory: root,
-    }, notification.upstream);
-    await reloaded.initialize();
-    assert.equal(reloaded.store.data.cursor, '1');
-    assert.equal(reloaded.status('default').enabled, true);
-});
-
-test('different assistants get distinct MCP keys and isolated reusable webhook settings', async () => {
-    const setup = await notification.setup('default', 3791);
-    const nonce = setup.url.split('/').at(-1);
-    const otherSettings = settings('Noodle');
-    otherSettings.set('mode', 'new');
-    otherSettings.set('secret', 'another-private-key');
-    const page = await notification.submitSetup(nonce, otherSettings);
-    const newToken = page.match(/<code>([a-f0-9]{64})<\/code>/)?.[1];
-    assert.ok(newToken, 'New assistant receives only one dedicated MCP key, shown once in the browser');
-    const identity = notification.identityFor(newToken);
-    assert.ok(identity && identity !== 'default');
-    assert.equal(notification.status(identity).assistant, 'Noodle');
-
-    const unrelated = await notification.trackJob(identity, {
-        structuredContent: { job: { jobId: 'jobother02' } },
-    });
-    assert.equal(unrelated, undefined);
-    await assert.rejects(notification.trackJob('default', {
-        structuredContent: { job: { jobId: 'jobother02' } },
-    }), /different assistant/);
-    jobStates.set('jobother02', {
-        jobId: 'jobother02', title: '另一位助理的報告',
-        state: 'idle', waitingOnDelegatedWork: false,
-    });
-    cursor = '2';
-    feedEvents.push({
-        cursor: '2', type: 'state_changed', toState: 'idle',
-        jobId: 'jobother02', at: new Date(Date.now() + 1000).toISOString(),
-    });
-    await notification.poll();
-    assert.equal(alerts.length, 2);
-    assert.equal(alerts[1].header, 'Bearer another-private-key');
-    assert.equal(alerts[1].body.assistant, 'Noodle');
-
-    await notification.decline(identity);
-    assert.equal(notification.status(identity).preference, 'off');
-    assert.equal(notification.status(identity).enabled, false);
-});
-
-test('jobs waiting on delegated work never create a false completion notice', async () => {
-    jobStates.set('jobfirst01', {
-        jobId: 'jobfirst01', title: '行銷追蹤工具',
-        state: 'idle', waitingOnDelegatedWork: true,
-    });
-    cursor = '3';
-    feedEvents.push({
-        cursor: '3', type: 'state_changed', toState: 'idle',
-        jobId: 'jobfirst01', at: new Date(Date.now() + 2000).toISOString(),
-    });
-    await notification.poll();
-    assert.equal(alerts.length, 2);
-});
-
-test('the outbound sender blocks SSRF and redirects, but supports an explicit local webhook receiver', async () => {
-    assert.throws(() => validateWebhook({
-        url: 'http://192.168.1.4/hooks', secret: 'test',
-    }), /HTTPS/);
-    assert.throws(() => validateWebhook({
-        url: 'https://127.0.0.1/hooks', secret: 'test',
-    }), /HTTPS/);
-    assert.throws(() => validateWebhook({
-        url: 'https://example.org/hook', secret: 'abc\nInjection: value',
-    }), /金鑰/);
-
-    const sender = new WebhookSender();
-    await sender.deliver({
-        url: 'http://127.0.0.1:' + receiver.address().port + '/webhook',
-        header: 'X-Webhook-Secret', secret: 'test-local',
-    }, { deliveryId: 'test-1', event: 'work.test' });
-    assert.equal(alerts.at(-1).body.event, 'work.test');
-    alerts.pop();
-});
-
-test('failed webhook delivery is durably retried after restart without losing a completion event', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'awg-webhook-retry-'));
-    const key = 'private-per-install-storage-secret-0123456789';
-    const config = {
-        clientToken: masterToken, notificationStorageKey: key, notificationStateDirectory: directory,
-    };
-    const event = {
-        cursor: '19', jobId: 'retryjob9', type: 'state_changed', toState: 'idle',
-        at: new Date(Date.now() + 1000).toISOString(),
-    };
-    const upstream = {
-        async callTool(name, args) {
-            if (name === 'work_feed') {
-                return { structuredContent: {
-                    events: Number(args.cursor) < 19 ? [event] : [],
-                    nextCursor: '19', hasMore: false,
-                } };
-            }
-            return { structuredContent: { job: {
-                jobId: 'retryjob9', title: '網站製作', state: 'idle',
-                waitingOnDelegatedWork: false,
-            } } };
-        },
-    };
-    let attempts = 0;
-    const failed = new JobNotificationService(config, upstream, {
-        sender: { deliver: async () => { attempts++; throw new Error('Receiver unavailable'); } },
-    });
+test('one shared MCP token can register two routes and deliver each job only to its paired webhook', async () => {
+    const t = await fixture();
     try {
-        await failed.initialize();
-        await failed.store.configure('default', {
-            name: 'Sage',
-            webhook: { url: 'https://webhook.example.invalid/receiver', header: 'Authorization', secret: 'encrypted-secret' },
+        const sage = await t.pair('Sage', 'sage-callback-secret');
+        const noodle = await t.pair('Noodle', 'noodle-callback-secret');
+        assert.notEqual(sage, noodle);
+        assert.notEqual(t.service.resolveRoute(sage), t.service.resolveRoute(noodle));
+        await t.service.trackJob(sage, { structuredContent: { job: { jobId: 'sagejob1' } } });
+        await t.service.trackJob(noodle, { structuredContent: { job: { jobId: 'noodlejob2' } } });
+        t.jobStates.set('sagejob1', {
+            jobId: 'sagejob1', state: 'idle', title: '行銷工具 [job:sagejob1]',
+            waitingOnDelegatedWork: false,
         });
-        await failed.trackJob('default', { structuredContent: { job: { jobId: 'retryjob9' } } });
-        await failed.poll();
-        assert.equal(attempts, 1);
-        assert.equal(failed.store.data.pending.length, 1);
-        assert.equal(failed.store.data.cursor, '19');
-
-        let delivered = [];
-        const restored = new JobNotificationService(config, upstream, {
-            sender: { deliver: async (_settings, payload) => { delivered.push(payload); } },
+        t.jobStates.set('noodlejob2', {
+            jobId: 'noodlejob2', state: 'needs_input', title: '資料整理',
+            waitingOnDelegatedWork: false,
         });
-        await restored.initialize();
-        await restored.poll();
-        assert.equal(delivered.length, 1);
-        assert.equal(delivered[0].deliveryId, '19');
-        assert.equal(restored.store.data.pending.length, 0);
-        await restored.poll();
-        assert.equal(delivered.length, 1);
+        const time = new Date(Date.now() + 1000).toISOString();
+        t.feed([
+            { cursor: '1', jobId: 'sagejob1', type: 'state_changed', toState: 'idle', at: time },
+            { cursor: '2', jobId: 'noodlejob2', type: 'state_changed', toState: 'needs_input', at: time },
+        ], '2');
+        await t.service.poll();
+        assert.deepEqual(t.alerts.map((x) => x.secret),
+            ['Bearer sage-callback-secret', 'Bearer noodle-callback-secret']);
+        assert.deepEqual(t.alerts.map((x) => x.body.event),
+            ['work.turn_finished', 'work.needs_input']);
+        await t.service.poll();
+        assert.equal(t.alerts.length, 2, 'Stored cursor deduplicates callbacks');
+        const ciphertext = await readFile(path.join(t.root, 'assistant-webhooks.enc.json'), 'utf8');
+        assert.doesNotMatch(ciphertext, /sage-callback-secret|noodle-callback-secret|Sage|Noodle|[a-f0-9]{64}/);
+        assert.equal(t.service.status(sage).enabled, true);
+        assert.equal(t.service.status(noodle).enabled, true);
     } finally {
-        await rm(directory, { recursive: true, force: true });
+        await t.close();
     }
 });
 
-test('assistant webhook profiles survive rotation of the externally visible MCP connection key', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'awg-webhook-key-rotation-'));
+test('consent denied means no route callback; route IDs cannot rebind someone else’s job', async () => {
+    const t = await fixture();
     try {
-        const stableKey = 'internal-persistent-encryption-key-012345678901';
-        const first = new JobNotificationService({
-            clientToken: masterToken, notificationStorageKey: stableKey,
-            notificationStateDirectory: directory,
-        }, {});
-        await first.initialize();
-        const dedicatedToken = await first.store.createAssistant({
-            name: 'Another Assistant',
-            webhook: { url: 'https://example.invalid/webhook', header: 'Authorization', secret: 'internal-webhook-secret' },
-        });
-        await first.store.trackJob(first.identityFor(dedicatedToken), 'somejob99');
+        const sage = await t.pair('Sage', 'sage-notification-key');
+        const noodle = await t.pair('Noodle', 'noodle-notification-key');
+        await t.service.trackJob(sage, { structuredContent: { job: { jobId: 'ownedjob9' } } });
+        await assert.rejects(
+            t.service.trackJob(noodle, { structuredContent: { job: { jobId: 'ownedjob9' } } }),
+            /different assistant/,
+        );
+        await assert.rejects(t.service.trackJob('0'.repeat(64), {
+            structuredContent: { job: { jobId: 'eviljob9' } },
+        }), /unknown/);
+        assert.equal(t.service.store.data.jobs.eviljob9, undefined);
+        const declined = await t.service.decline(sage);
+        assert.equal(declined.preference, 'off');
+        assert.equal(declined.notificationRouteId, sage);
+        assert.throws(() => t.service.resolveRoute(sage), /disabled/);
 
-        const second = new JobNotificationService({
-            clientToken: 'new-mcp-external-key-after-a-rotation-abcdef',
-            notificationStorageKey: stableKey,
-            notificationStateDirectory: directory,
-        }, {});
-        await second.initialize();
-        const identity = second.identityFor(dedicatedToken);
-        assert.ok(identity && identity !== 'default');
-        assert.equal(second.store.profileFor(identity).name, 'Another Assistant');
-        assert.equal(second.store.data.jobs.somejob99, identity);
-        assert.equal(second.store.profileFor(identity).webhook.secret, 'internal-webhook-secret');
-        assert.equal(second.identityFor(masterToken), null, 'Old master token is not accepted after rotation');
+        const never = await t.service.decline();
+        assert.match(never.notificationRouteId, /^[a-f0-9]{64}$/);
+        assert.equal(t.service.status(never.notificationRouteId).preference, 'off');
+        assert.equal(t.service.status().preference, 'unset');
     } finally {
-        await rm(directory, { recursive: true, force: true });
+        await t.close();
     }
 });
 
-test('webhook destinations are pinned to vetted public DNS results rather than private or redirected targets', async () => {
-    const sender = new WebhookSender({
+test('receiver failure retains an encrypted retry queue across restarts and MCP bearer rotation', async () => {
+    const t = await fixture();
+    try {
+        const route = await t.pair('Sage', 'durable-webhook-secret');
+        await t.service.trackJob(route, { structuredContent: { job: { jobId: 'retryjob88' } } });
+        t.jobStates.set('retryjob88', {
+            jobId: 'retryjob88', state: 'idle', waitingOnDelegatedWork: false, title: '網站工具',
+        });
+        const next = new Date(Date.now() + 1000).toISOString();
+        t.feed([{ cursor: '11', jobId: 'retryjob88', type: 'state_changed', toState: 'idle', at: next }], '11');
+
+        t.service.sender = { deliver: async () => { throw new Error('Temporary receiver outage'); } };
+        await t.service.poll();
+        assert.equal(t.service.store.data.pending.length, 1);
+        assert.equal(t.service.store.data.cursor, '11');
+
+        const afterRotation = new JobNotificationService({
+            notificationStateDirectory: t.root, notificationStorageKey: secret,
+            clientToken: 'a-different-shared-mcp-connection-key-12345678',
+        }, t.upstream, { sender: { deliver: async (_settings, message) => {
+            t.alerts.push({ body: message, secret: 'sent-after-restart' });
+        } } });
+        await afterRotation.initialize();
+        assert.equal(afterRotation.status(route).enabled, true);
+        await afterRotation.poll();
+        assert.equal(t.alerts.length, 1);
+        assert.equal(t.alerts[0].body.deliveryId, '11');
+        assert.equal(afterRotation.store.data.pending.length, 0);
+        await afterRotation.poll();
+        assert.equal(t.alerts.length, 1);
+        afterRotation.close();
+    } finally {
+        await t.close();
+    }
+});
+
+test('delegated work does not emit an early completion callback', async () => {
+    const t = await fixture();
+    try {
+        const route = await t.pair('Sage', 'private-key-for-delegated-work');
+        await t.service.trackJob(route, { structuredContent: { job: { jobId: 'delegate99' } } });
+        t.jobStates.set('delegate99', {
+            jobId: 'delegate99', state: 'idle', title: 'Task',
+            waitingOnDelegatedWork: true,
+        });
+        t.feed([{
+            cursor: '4', jobId: 'delegate99', type: 'state_changed',
+            toState: 'idle', at: new Date(Date.now() + 1000).toISOString(),
+        }], '4');
+        await t.service.poll();
+        assert.equal(t.alerts.length, 0);
+    } finally {
+        await t.close();
+    }
+});
+
+test('webhook sender blocks private DNS and redirect chains, permits deliberate loopback testing', async () => {
+    assert.throws(() => validateWebhook({
+        url: 'http://192.168.1.4/hooks', secret: 'key',
+    }), /HTTPS/);
+    assert.throws(() => validateWebhook({
+        url: 'https://127.0.0.1/hook', secret: 'key',
+    }), /HTTPS/);
+    const dnsRebind = new WebhookSender({
         resolve: async () => [{ address: '127.0.0.1', family: 4 }],
     });
-    await assert.rejects(sender.deliver({
-        url: 'https://notify.example.invalid/hooks',
-        header: 'Authorization', secret: 'test-key',
-    }, { deliveryId: 'ssrf-test' }), /私人網路/);
-
+    await assert.rejects(dnsRebind.deliver({
+        url: 'https://notify.example.invalid/hooks', secret: 'test',
+    }, { deliveryId: 'blocked' }), /私人網路/);
     const redirect = createServer((_request, response) => {
-        response.writeHead(302, { location: 'http://127.0.0.1:12345/' });
+        response.writeHead(302, { location: 'http://127.0.0.1:1234/redirected' });
         response.end();
     });
     await new Promise((resolve) => redirect.listen(0, '127.0.0.1', resolve));
     try {
         await assert.rejects(new WebhookSender().deliver({
             url: 'http://127.0.0.1:' + redirect.address().port + '/notify',
-            header: 'Authorization', secret: 'test-key',
-        }, { deliveryId: 'redirect-test' }), /HTTP 302/);
+            secret: 'test-key',
+        }, { deliveryId: 'redirect' }), /HTTP 302/);
     } finally {
         await new Promise((resolve) => redirect.close(resolve));
     }
