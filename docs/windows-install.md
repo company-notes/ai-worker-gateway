@@ -44,6 +44,12 @@
 
 不要停止 3790／3773，也不要強行終止不明程序。安裝器會在登入排程啟動後驗證 3791 健康狀態。
 
+## OpenMausBot 的 Skill 啟用不可省略
+
+**注意：曾經發生過「助理只看到 Skill 檔案路徑，便轉去自己執行 mkdir 和寫 HTML」的真實失敗案例。** 單純發送 `SKILL.md` 路徑或讓 Bot 讀過文字，不等於 Skills 已啟用。OpenMausBot 必須在個別 Bot 的 Skills 明確匯入全文／打開開關，並在 Bot Tools → Access → MCP servers 啟用 `local-3791`。專職派工 Bot 也建議在固定角色 Instructions 設為「先 Gateway 後執行、不可本機代做」；Skill 本身不是強制政策。
+
+詳見 [OpenMausBot 安裝與不帶歷史的第一工具驗收](openmausbot-setup.md)。
+
 ## 匯入 Skill（只需一次）
 
 匯入檔位置：

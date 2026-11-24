@@ -15,6 +15,9 @@ Without local provisioning or a suitable existing destination the gateway must *
 
 ## Blind test: install Session Router Skill, but no previous conversation
 
+**OpenMausBot 特別前置檢查**：請先依 [OpenMausBot 設定指引](openmausbot-setup.md) 在 Bot Settings → Skills 真正開啟 Skill 並於 Tools → Access 啟用 Gateway。只傳送 `SKILL.md` Windows 檔案路徑給 Bot 不算安裝。第一個實際工作工具若是本機 `mkdir`、寫 `index.html`，即判定路由失敗，即使它做出的網站可以使用，也不算 Gateway 驗收通過。
+
+
 Create a brand-new agent or fresh conversation. **Install and enable the published `session-router` Skill once**, plus exactly one MCP connection to `http://127.0.0.1:3791/mcp` using its inbound client bearer. Do **not** load the old private conversation, paste this guide as a prompt, configure the original 3790 MCP, or mention T3. The Skill supplies intent routing; tool descriptions and live status supply capabilities. The agent should work without remembering any previous chat.
 
 ### Scenario A — new unrelated marketing task

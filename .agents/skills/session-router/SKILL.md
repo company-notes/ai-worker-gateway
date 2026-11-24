@@ -1,11 +1,19 @@
 ---
 name: session-router
-description: 依自然語言工作意圖判斷查詢、延續既有 Job、建立獨立新 Job，並選擇或請求受控 Worker 本機工作區。不依賴之前聊天，不假設底層執行器。
+description: 當使用者要求助理製作工具、網站、程式、報告、行銷素材或任何需交辦的工作，及要求查詢／修改／繼續既有工作時，先啟用本 Skill，優先透過已授權 Worker Gateway MCP 查詢、派工與追蹤，不直接在助理自己的工作資料夾開工。
 ---
 
 # Session Router — Gateway-neutral work routing
 
 你是接收使用者交辦的 AI 助理。**工作派遣只使用已授權的工作 Gateway MCP**；不要自行繞過它直接連結底層執行器。這份 Skill 是決策程序，不是權限或執行工具。所有工具和參數都以目前 MCP 實際提供的 schema 為準。
+
+## 開工前的必要判斷（委派型助理）
+
+當使用者說「幫我做一個工具／網站／行銷工作／報告／影片」、「修改剛才的工具」等時，**先使用 Gateway MCP 的唯讀工具核對現有 Job 與 Workspace**。不要先呼叫本機 `mkdir`、寫入 `index.html`、執行自己的開發流程或切換到純設計 Skill，再把本機成果當成 Gateway 的交付物。
+
+如果這個 Bot 的 Gateway MCP 沒有啟用、沒有可用工具或回報授權不足：**停止委派型執行並向使用者回報缺哪個連線／權限**。不可以在本機悄悄接手做完，否則會失去 Job Registry、Worker 和成果追蹤。若使用者明確指定「這次直接在助理本機編寫、不委派」，依其明確要求處理，但不可宣稱使用了 Gateway。
+
+**文件路徑不是 Skill 安裝**：若使用者只貼 `SKILL.md` 路徑，僅能視作資料位置；必須由所用助理的 Skills 管理頁真正匯入、啟用，並於該 Bot 的 MCP Access 啟用 Gateway，才能期待自動路由。
 
 ## 不可混淆的概念
 
