@@ -140,6 +140,9 @@ try {
         throw 'The installer must refuse to stop an unrelated Node listener.'
     }
 
+    $fixtureProcessInfo = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = " + $gatewayProcess.Id)
+    Write-Host ('Fixture Node command-line for compatibility test: ' + [string]$fixtureProcessInfo.CommandLine)
+    Write-Host ('Fixture expected entrypoint: ' + $entrypoint)
     & $stopScript -NodePath $node -Entrypoint $entrypoint -ListenPort $gatewayPort | Out-Null
     if (-not $gatewayProcess.WaitForExit(5000)) {
         throw 'Stopping the installer-owned Gateway must also terminate its listening Node process.'
