@@ -72,7 +72,7 @@ function settings(name = 'Sage') {
 
 test('user opts in once using a local form; secret is encrypted and never reaches the assistant', async () => {
     assert.deepEqual(notification.status('default').preference, 'unset');
-    const setup = notification.setup('default', 3791);
+    const setup = await notification.setup('default', 3791);
     assert.match(setup.url, /^http:\/\/127\.0\.0\.1:3791\/notifications\/setup\/[A-Za-z0-9_-]{32}$/);
     const nonce = setup.url.split('/').at(-1);
     assert.match(notification.renderSetup(nonce), /Webhook 網址/);
@@ -117,7 +117,7 @@ test('Gateway sends a finished-turn event to the correct assistant webhook only 
 });
 
 test('different assistants get distinct MCP keys and isolated reusable webhook settings', async () => {
-    const setup = notification.setup('default', 3791);
+    const setup = await notification.setup('default', 3791);
     const nonce = setup.url.split('/').at(-1);
     const otherSettings = settings('Noodle');
     otherSettings.set('mode', 'new');
