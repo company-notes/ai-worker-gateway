@@ -1,5 +1,4 @@
 import { createServer } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
 import { UpstreamMCPClient } from './UpstreamMCPClient.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { TaskDispatchService } from './TaskDispatchService.js';
@@ -15,7 +14,7 @@ export class WorkerGateway {
         this.taskDispatch = new TaskDispatchService(this.upstream, config.generalProject);
         this.provision = new WorkspaceProvisionService(config, this.workspaces, this.upstream, services.projectAdapter);
         this.deliveries = new DeliveryService(config, this.upstream, { openFolder: services.openFolder });
-        this.notifications = new JobNotificationService(config, this.upstream, { notify: services.notify });
+        this.notifications = new JobNotificationService(config, this.upstream, { sender: services.webhookSender });
         this.server = createServer((request, response) => {
             this._handleRequest(request, response).catch((error) => {
                 console.error('Worker Gateway request failed:', error.message);
@@ -33,14 +32,14 @@ export class WorkerGateway {
         response.end(JSON.stringify(body));
     }
 
-    _isAuthorized(request) {
-        const provided = request.headers.authorization;
-        const expected = `Bearer ${this.config.clientToken}`;
-        if (typeof provided !== 'string' || Buffer.byteLength(provided) !== Buffer.byteLength(expected)) {
-            return false;
+    _authenticatedAssistant(request) {
+        const authorization = request.headers.authorization;
+        if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
+            return null;
         }
 
-        return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+        const token = authorization.slice(7);
+        return this.notifications.identityFor(token);
     }
 
     async _readPayload(request) {
@@ -66,6 +65,7 @@ export class WorkerGateway {
             ...this.taskDispatch.getTools(),
             this.provision.getTool(),
             this.deliveries.getTool(),
+            ...this.notifications.getTools(),
             {
                 name: 'worker_workspace_plan',
                 description: 'Inspect an approved local workspace slug without modifying files. It does not create a T3 Project.',
@@ -104,11 +104,31 @@ export class WorkerGateway {
         return { jsonrpc: '2.0', id, result };
     }
 
-    async _handleExtension(payload) {
+    async _handleExtension(payload, assistantId) {
         const { name, arguments: args } = payload.params;
         try {
             if (this.taskDispatch.handles(name)) {
-                return this._extensionResult(payload.id, await this.taskDispatch.run(name, args));
+                const result = await this.taskDispatch.run(name, args);
+                if (name === 'worker_task_start' && this.notifications.store.active) {
+                    await this.notifications.trackJob(assistantId, result);
+                }
+                return this._extensionResult(payload.id, result);
+            }
+            if (name === 'worker_notification_status' || name === 'worker_notification_setup' ||
+                name === 'worker_notification_decline') {
+                if (!args || typeof args !== 'object' || Array.isArray(args) ||
+                    Object.keys(args).length !== 0) {
+                    throw new Error('Notification settings do not accept tool arguments.');
+                }
+                const value = name === 'worker_notification_status'
+                    ? this.notifications.status(assistantId)
+                    : name === 'worker_notification_setup'
+                        ? this.notifications.setup(assistantId, this.server.address().port)
+                        : await this.notifications.decline(assistantId);
+                return this._extensionResult(payload.id, {
+                    content: [{ type: 'text', text: JSON.stringify(value) }],
+                    structuredContent: value, isError: false,
+                });
             }
             if (name === 'worker_delivery_link') {
                 const value = await this.deliveries.linkFor(args, this.server.address().port);
@@ -140,14 +160,22 @@ export class WorkerGateway {
         }
     }
 
-    async _handleMCP(payload, protocolVersion) {
+    async _handleMCP(payload, protocolVersion, assistantId) {
         const extensionNames = new Set(this._extensionTools().map((tool) => tool.name));
         if (payload.method === 'tools/call' && extensionNames.has(payload.params?.name)) {
-            const result = await this._handleExtension(payload);
+            const result = await this._handleExtension(payload, assistantId);
             return { status: 200, body: JSON.stringify(result), contentType: 'application/json' };
         }
 
         const upstreamResponse = await this.upstream.forward(payload, protocolVersion);
+        if (payload.method === 'tools/call' && payload.params?.name === 'work_start' &&
+            this.notifications.store.active && upstreamResponse.status === 200 &&
+            upstreamResponse.contentType.includes('application/json')) {
+            const result = JSON.parse(upstreamResponse.body)?.result;
+            if (result?.isError !== true) {
+                await this.notifications.trackJob(assistantId, result);
+            }
+        }
         if (payload.method === 'initialize' && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
@@ -156,7 +184,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide internal job IDs, branches, worktrees and commit details unless asked. The Worker should commit each verified meaningful stage automatically and save a final Git version without asking the user to approve a Commit. When work_status says idle, verify the actual output and call worker_delivery_link to get a clickable one-time Explorer folder URL and the real versionSaved flag. On Windows, this gateway can show a background desktop notification. To notify within OpenMausBot chat, the Bot must actually create and enable one background work_feed Routine; never promise a chat notification without an active routine.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. The Worker should commit each verified meaningful stage automatically. When work_status says idle, inspect the output and offer worker_delivery_link. For notifications, first call worker_notification_status. If preference is unset, ask the user once whether they want automatic updates; if yes, call worker_notification_setup and show the local setup link. The user enters the destination webhook URL and key directly in the local Gateway form. Once configured, the Gateway sends task-change events to that assistant webhook; if declined, record that choice and do not send alerts. Do not claim a webhook is configured until the user completes setup. This works with any assistant that provides a webhook receiver, not only OpenMausBot.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
@@ -208,14 +236,69 @@ export class WorkerGateway {
         }
     }
 
+    async _handleNotificationPage(request, response, pathname) {
+        const expectedHost = '127.0.0.1:' + this.server.address().port;
+        const origin = 'http://' + expectedHost;
+        const remote = request.socket.remoteAddress;
+        if (request.headers.host !== expectedHost ||
+            !['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) ||
+            (request.method === 'POST' && request.headers.origin !== origin)) {
+            this._sendJSON(response, 403, { error: 'Notification setup is available only on this computer.' });
+            return;
+        }
+
+        response.setHeader('cache-control', 'no-store');
+        response.setHeader('referrer-policy', 'no-referrer');
+        response.setHeader('x-frame-options', 'DENY');
+        response.setHeader('x-content-type-options', 'nosniff');
+        response.setHeader('content-security-policy',
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+        const nonce = pathname.slice('/notifications/setup/'.length);
+        try {
+            let page;
+            if (request.method === 'GET') {
+                page = this.notifications.renderSetup(nonce);
+            } else if (request.method === 'POST') {
+                if (!String(request.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded')) {
+                    throw new Error('Expected a form submission.');
+                }
+                let size = 0;
+                const parts = [];
+                for await (const part of request) {
+                    size += part.length;
+                    if (size > 8192) {
+                        throw new Error('Notification settings exceed the supported form size.');
+                    }
+                    parts.push(part);
+                }
+                page = await this.notifications.submitSetup(nonce,
+                    new URLSearchParams(Buffer.concat(parts).toString('utf8')));
+            } else {
+                response.writeHead(405, { allow: 'GET, POST' });
+                response.end();
+                return;
+            }
+            response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            response.end(page);
+        } catch (error) {
+            response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+            response.end('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><p>設定未完成。請確認欄位及 Webhook 接收端，再透過助理重新取得設定連結。</p></html>');
+        }
+    }
+
     async _handleRequest(request, response) {
         const pathname = new URL(request.url, 'http://localhost').pathname;
+        if (pathname.startsWith('/notifications/setup/')) {
+            await this._handleNotificationPage(request, response, pathname);
+            return;
+        }
         if (request.method === 'GET' && pathname.startsWith('/open-delivery/')) {
             await this._openDeliveryLink(request, response, pathname);
             return;
         }
 
-        if (!this._isAuthorized(request)) {
+        const assistantId = this._authenticatedAssistant(request);
+        if (!assistantId) {
             response.setHeader('www-authenticate', 'Bearer');
             this._sendJSON(response, 401, { error: 'Authentication required' });
             return;
@@ -242,7 +325,7 @@ export class WorkerGateway {
             this._sendJSON(response, 400, { error: error.message });
             return;
         }
-        const result = await this._handleMCP(payload, request.headers['mcp-protocol-version']);
+        const result = await this._handleMCP(payload, request.headers['mcp-protocol-version'], assistantId);
         response.writeHead(result.status, {
             'content-type': result.contentType,
             'cache-control': 'no-store',
@@ -251,6 +334,7 @@ export class WorkerGateway {
     }
 
     async listen() {
+        await this.notifications.initialize();
         await new Promise((resolve, reject) => {
             this.server.once('error', reject);
             this.server.listen(this.config.listenPort, this.config.listenHost, resolve);
