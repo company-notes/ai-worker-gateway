@@ -43,6 +43,11 @@ $provisioningPlan = & (Join-Path $PSScriptRoot 'Install-WorkerGateway.ps1') -Pla
 if ($provisioningPlan.enablesProvisioning -ne $true) {
     throw 'Provisioning mode must be explicit, and PlanOnly cannot create a T3 project.'
 }
+
+$noProvisioning = & (Join-Path $PSScriptRoot 'Install-WorkerGateway.ps1') -PlanOnly -NoProvisioning
+if ($noProvisioning.enablesProvisioning -ne $false) {
+    throw 'A local operator must be able to decline automatic workspace provisioning.'
+}
 if ((Test-Path -LiteralPath $settingsPath) -ne $existedBefore) {
     throw 'Planning provisioning must not create or alter a persisted configuration.'
 }

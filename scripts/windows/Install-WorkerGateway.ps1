@@ -147,9 +147,7 @@ if (-not $ProvisionHost -and (Test-Path -LiteralPath $fleetConfigPath -PathType 
 if ($EnableProvisioning -and $NoProvisioning) {
     throw 'Choose either EnableProvisioning or NoProvisioning, not both.'
 }
-if ($NoProvisioning) {
-    $ProvisionHost = $null
-}
+$grantHost = $ProvisionHost
 
 
 $existing = $null
@@ -206,11 +204,15 @@ if ($UpstreamTokenFile) {
 } elseif ($previousManaged -and (Test-Path -LiteralPath $upstreamSecretFile -PathType Leaf)) {
     $upstreamSecret = Read-Secret $upstreamSecretFile
     $managedFleetGrant = $true
+    if ($null -ne $existing.PSObject.Properties['managedFleetHost'] -and
+        $existing.managedFleetHost -ne $grantHost) {
+        throw 'Managed Fleet grant belongs to a different host. Re-run with an explicitly reviewed Fleet configuration.'
+    }
     if ($null -ne $existing.PSObject.Properties['managedFleetClientId']) {
         $managedFleetClientId = [string]$existing.managedFleetClientId
     }
 } else {
-    if (-not $ProvisionHost) {
+    if (-not $grantHost) {
         throw 'Cannot determine one local Fleet host. The operator must first configure one authorized local host.'
     }
     if (-not (Test-Path -LiteralPath $fleetCliPath -PathType Leaf) -or
@@ -218,8 +220,8 @@ if ($UpstreamTokenFile) {
         -not (Test-Path -LiteralPath $fleetDataPath -PathType Container)) {
         throw 'Existing local Fleet installation not found. Full clean-machine Fleet bootstrap is not yet supported by this installer.'
     }
-    Write-Host ('Preparing one internal, host-scoped worker authorization for ' + $ProvisionHost + ' (no extra token to copy).')
-    $newGrant = & $grantInstaller -NodePath $node -FleetCliPath $fleetCliPath -HostId $ProvisionHost -FleetConfigPath $fleetConfigPath -FleetDataDir $fleetDataPath
+    Write-Host ('Preparing one internal, host-scoped worker authorization for ' + $grantHost + ' (no extra token to copy).')
+    $newGrant = & $grantInstaller -NodePath $node -FleetCliPath $fleetCliPath -HostId $grantHost -FleetConfigPath $fleetConfigPath -FleetDataDir $fleetDataPath
     $upstreamSecret = $newGrant.secret
     $managedFleetClientId = [string]$newGrant.clientId
     $managedFleetGrant = $true
@@ -343,6 +345,7 @@ $settings = @{
     generalProject = if ($GeneralProject) { $GeneralProject } else { $null }
     workspaceRoot = if ($WorkspaceRoot) { [IO.Path]::GetFullPath($WorkspaceRoot) } else { $null }
     provision_host = if ($provisionEnabled) { $ProvisionHost } else { $null }
+    managedFleetHost = if ($managedFleetGrant) { $grantHost } else { $null }
     provision_model_selection = $provisionModelSelection
     managedFleetGrant = $managedFleetGrant
     managedFleetClientId = $managedFleetClientId
