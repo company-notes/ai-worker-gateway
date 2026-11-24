@@ -1,6 +1,6 @@
 ---
 name: session-router
-description: 當使用者要求助理製作工具、網站、程式、報告、行銷素材或任何需交辦的工作，及要求查詢／修改／繼續既有工作時，先啟用本 Skill，優先透過已授權 Worker Gateway MCP 查詢、派工與追蹤，不直接在助理自己的工作資料夾開工。
+description: 當使用者要求製作工具、網站、程式、報告、行銷素材、查詢進度或修改先前工作時，先走 Worker Gateway MCP 派工或續作；完成後用一般人聽得懂的語言、可點擊的成果資料夾、背景完成通知交付；Git 階段版本自動保存，不要求使用者決定 Commit。
 ---
 
 # Session Router — Gateway-neutral work routing
@@ -15,6 +15,19 @@ description: 當使用者要求助理製作工具、網站、程式、報告、�
 
 **文件路徑不是 Skill 安裝**：若使用者只貼 `SKILL.md` 路徑，僅能視作資料位置；必須由所用助理的 Skills 管理頁真正匯入、啟用，並於該 Bot 的 MCP Access 啟用 Gateway，才能期待自動路由。
 
+## 一般人實際看到的體驗（不是工程師的調試報告）
+
+- **派工時**：只說「已開始處理『行銷成效追蹤工具』」，有已成功設定的背景通知才說「完成後會通知你」。不以 Job ID、Host、Workspace、branch、worktree、Commit ID、T3 thread URL 等識別碼充當主回覆；全部留給系統內部追蹤，只有使用者明確要技術細節才提供。
+- **完成時**：用人話說明做好什麼、測了什麼、還缺什麼；給出成果檔案名稱，以及 **[查看成果資料夾]** 等清楚的可點連結。不要丟出只有 Windows 路徑的天書，更不要讓使用者自己查 Git worktree。
+- **直接開資料夾**：查實際工作 `work_status`，待完成且交付物已核對後，若單一 3791 MCP 提供 `worker_delivery_link`，用真的 Job ID 呼叫它，將回傳的 `url` 做成 Markdown **[查看成果資料夾](url)**。使用者點擊後會在**同一台 Windows Worker 電腦**開啟 Explorer。網址是短期、一次性連結；過期時重新呼叫工具產生新連結。不要假造 `file://` 或 Windows 檔案連結，也不要把內部資料夾任意映射成公開 HTTP 網站。
+- **Git 預設自動保存**：讓 Worker 在有 Git 的執行環境中，每完成一段可驗證的成果就安全 Commit 一次，最終交付前也要完成 Commit；只提交本次工作實際修改的檔案，不覆蓋或混入其他未完成變更。不 Push、不 Merge、不改 main，除非使用者明確交辦。**絕對不要問一般使用者「要不要 Commit？」** 使用者不滿意時繼續修改、再保存新版本。如果沒有 Git 或 Commit 失敗，就如實說明，不假稱版本已保存。
+
+## 背景自動通知：必須有真正的執行者
+
+- Windows 上，已升級的 AI Worker Gateway 可在背景以原版 `work_feed` 偵測自己派出的工作狀態變化，並在登入中的本機桌面顯示系統提示。**`idle` 代表這一輪停止，不是驗收完成**；提示只說「這輪處理已結束，請查看成果」，除非完成品質檢查。
+- **要把結果主動送回 OpenMausBot 聊天**，不能只在聊天裡承諾。若目前 Bot 支援建立自己的 OpenMausBot **Routines／背景例行工作**，第一次成功派工時建立一次「Worker 工作結果提醒」（已存在就重用，不要每個 Job 建一個）：每約 5 分鐘透過唯一的 3791 MCP 讀 `work_feed`，保存 `nextCursor`（可用 Routine 的 Remember the last run），只處理上次後的新事件；新完成／需輸入／失敗才呼叫 `work_status`、查驗成果並發一則**簡短結果到 Bot 主聊天**。初次執行先記住目前 cursor，避免把所有舊工作重發；勾選 App 啟動時補查（若支援），並在檢查正常時保持安靜。不要在已結束的聊天中假裝仍會自行繼續執行。
+- 若這個 Bot/引擎無法建立或啟用 Routine，**如實回報目前只有 Windows 桌面通知，OpenMausBot 聊天的自動推播尚未設好**；不可宣稱「完成後我會回來通知」卻沒有背景執行者。沒有接收端時不能直接修改 OpenMausBot 私有資料庫、繞過原有權限或洩漏 webhook 金鑰。
+
 ## 不可混淆的概念
 
 - **公司工作**：若有獲授權的正式 Card／Ticket／Issue 系統，以那裡的 Owner、需求、驗收和交付紀錄為準；沒有連線時不可假稱已存取。
@@ -28,8 +41,8 @@ description: 當使用者要求助理製作工具、網站、程式、報告、�
 3. 找 Job：查詢可見的 work_list、work_status、work_messages（或 Gateway 提供的等價工具）。如果有且只有一個正確、可續作的 Job，使用 work_continue，保留 Job ID；若多個候選，詢問一個區分問題；終態失敗或取消 Job 不可假裝續活。
 4. 對獨立新工作，檢查 fleet_status、fleet_projects 或同等 Workspace 發現能力，選擇**適合任務且已授權**的執行目的地。新話題不必然建立新的 Project；已有適當 Workspace 時，在同一 Workspace 開新的 Job。
 5. 如果找不到合適的執行空間，先檢查 Gateway 是否提供且管理員已啟用 `worker_workspace_ensure`（或等價的受控 Workspace Provisioning）。若有，為這個獨立工作取穩定且具區辨性的英文小寫 slug，呼叫 `worker_workspace_ensure({name, requestId, title?})`；若新專案尚無已核准的預設模型，先讀 `fleet_models` 選擇精確的 Provider／模型，作為 `worker_workspace_ensure` 的 `modelSelection`；Gateway 會驗證模型與選項。只有回傳 `dispatchReady: true`，才使用回傳的 `target` 與可選 `modelSelection` 派工。`worker_workspace_prepare` 只建立資料夾，不能作為已註冊 Project。若缺少 Host、模型、Fleet 的新專案權限、Git 或註冊能力，明確回報阻斷；不能暗中落到 Pilot、無關客戶 Project 或任意 Scratch。
-6. 確認合法目的地之後，透過 Gateway 呼叫 `work_start` 或它公開的等價能力，傳入完整工作、可驗收成果、限制和唯一 requestId。發生不確定回覆時重試必須使用**同一 requestId 和相同參數**，避免重複 Job。
-7. 拿到真正的 Job ID 後，用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆和交付物。需核准或輸入時如實回報，不得假稱自動完成。
+6. 確認合法目的地之後，透過 Gateway 呼叫 `work_start` 或它公開的等價能力，傳入完整工作、可驗收成果、限制和唯一 requestId。除非使用者明確另有要求，Worker 需於每個完成階段安全保存 Git 版本；Gateway 自己也會為工作訊息附帶版本保存政策。發生不確定回覆時重試必須使用**同一 requestId 和相同參數**，避免重複 Job。
+7. 拿到真正的 Job ID 後，依『背景自動通知』章節確保一次性的提醒機制已配置。用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆、實際交付物與是否已保存 Git 版本；未保存且可以續作時由助理請 Worker 在原工作安全完成 Commit，不要請一般使用者決定。成果確認後呼叫 worker_delivery_link（若可用）產生真正可點擊的 Explorer 連結。需核准或輸入時如實回報，不得假稱自動完成。
 8. 若要跨不同 Worker 或公司團隊交接，依正式工作系統與成果路徑移交；不要假設兩台機器可以共享同一個底層 Thread。
 
 ## 可選 Gateway 快捷工具
@@ -43,4 +56,4 @@ description: 當使用者要求助理製作工具、網站、程式、報告、�
 - 「另外規劃一支 30 秒產品影片」：建立另一個 Job；只有工作區確實不適用才另建 Workspace。
 - 「接著做昨天的網站」且有兩個符合的 Job：先問清楚，不任選一個。
 
-**回報原則**：說明使用的工作參照（若有正式系統）、Workspace、Job ID、狀態、交付物與阻斷原因；不要回傳認證資料、機器私密路徑或宣稱未做過的行動。
+**回報原則**：一般使用者只看到任務名稱、目前狀態、成果摘要、可點擊的成果資料夾及需要協助的事項。公司工作參照、Job ID、Workspace、分支、Commit ID 等保留作內部追蹤，只有被問到時才展示。不得回傳認證資料、無必要的機器私密路徑，或宣稱未做過的行動。
