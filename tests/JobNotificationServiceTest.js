@@ -188,3 +188,115 @@ test('the outbound sender blocks SSRF and redirects, but supports an explicit lo
     assert.equal(alerts.at(-1).body.event, 'work.test');
     alerts.pop();
 });
+
+test('failed webhook delivery is durably retried after restart without losing a completion event', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'awg-webhook-retry-'));
+    const key = 'private-per-install-storage-secret-0123456789';
+    const config = {
+        clientToken: masterToken, notificationStorageKey: key, notificationStateDirectory: directory,
+    };
+    const event = {
+        cursor: '19', jobId: 'retryjob9', type: 'state_changed', toState: 'idle',
+        at: new Date(Date.now() + 1000).toISOString(),
+    };
+    const upstream = {
+        async callTool(name, args) {
+            if (name === 'work_feed') {
+                return { structuredContent: {
+                    events: Number(args.cursor) < 19 ? [event] : [],
+                    nextCursor: '19', hasMore: false,
+                } };
+            }
+            return { structuredContent: { job: {
+                jobId: 'retryjob9', title: '網站製作', state: 'idle',
+                waitingOnDelegatedWork: false,
+            } } };
+        },
+    };
+    let attempts = 0;
+    const failed = new JobNotificationService(config, upstream, {
+        sender: { deliver: async () => { attempts++; throw new Error('Receiver unavailable'); } },
+    });
+    try {
+        await failed.initialize();
+        await failed.store.configure('default', {
+            name: 'Sage',
+            webhook: { url: 'https://webhook.example.invalid/receiver', header: 'Authorization', secret: 'encrypted-secret' },
+        });
+        await failed.trackJob('default', { structuredContent: { job: { jobId: 'retryjob9' } } });
+        await failed.poll();
+        assert.equal(attempts, 1);
+        assert.equal(failed.store.data.pending.length, 1);
+        assert.equal(failed.store.data.cursor, '19');
+
+        let delivered = [];
+        const restored = new JobNotificationService(config, upstream, {
+            sender: { deliver: async (_settings, payload) => { delivered.push(payload); } },
+        });
+        await restored.initialize();
+        await restored.poll();
+        assert.equal(delivered.length, 1);
+        assert.equal(delivered[0].deliveryId, '19');
+        assert.equal(restored.store.data.pending.length, 0);
+        await restored.poll();
+        assert.equal(delivered.length, 1);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('assistant webhook profiles survive rotation of the externally visible MCP connection key', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'awg-webhook-key-rotation-'));
+    try {
+        const stableKey = 'internal-persistent-encryption-key-012345678901';
+        const first = new JobNotificationService({
+            clientToken: masterToken, notificationStorageKey: stableKey,
+            notificationStateDirectory: directory,
+        }, {});
+        await first.initialize();
+        const dedicatedToken = await first.store.createAssistant({
+            name: 'Another Assistant',
+            webhook: { url: 'https://example.invalid/webhook', header: 'Authorization', secret: 'internal-webhook-secret' },
+        });
+        await first.store.trackJob(first.identityFor(dedicatedToken), 'somejob99');
+
+        const second = new JobNotificationService({
+            clientToken: 'new-mcp-external-key-after-a-rotation-abcdef',
+            notificationStorageKey: stableKey,
+            notificationStateDirectory: directory,
+        }, {});
+        await second.initialize();
+        const identity = second.identityFor(dedicatedToken);
+        assert.ok(identity && identity !== 'default');
+        assert.equal(second.store.profileFor(identity).name, 'Another Assistant');
+        assert.equal(second.store.data.jobs.somejob99, identity);
+        assert.equal(second.store.profileFor(identity).webhook.secret, 'internal-webhook-secret');
+        assert.equal(second.identityFor(masterToken), null, 'Old master token is not accepted after rotation');
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test('webhook destinations are pinned to vetted public DNS results rather than private or redirected targets', async () => {
+    const sender = new WebhookSender({
+        resolve: async () => [{ address: '127.0.0.1', family: 4 }],
+    });
+    await assert.rejects(sender.deliver({
+        url: 'https://notify.example.invalid/hooks',
+        header: 'Authorization', secret: 'test-key',
+    }, { deliveryId: 'ssrf-test' }), /私人網路/);
+
+    const redirect = createServer((_request, response) => {
+        response.writeHead(302, { location: 'http://127.0.0.1:12345/' });
+        response.end();
+    });
+    await new Promise((resolve) => redirect.listen(0, '127.0.0.1', resolve));
+    try {
+        await assert.rejects(new WebhookSender().deliver({
+            url: 'http://127.0.0.1:' + redirect.address().port + '/notify',
+            header: 'Authorization', secret: 'test-key',
+        }, { deliveryId: 'redirect-test' }), /HTTP 302/);
+    } finally {
+        await new Promise((resolve) => redirect.close(resolve));
+    }
+});
