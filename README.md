@@ -23,7 +23,7 @@ The installer checks 3773 and 3790, automatically mints a local-host-scoped inte
 完成的成果對一般使用者應呈現為：「行銷成效追蹤工具已經可以查看。已測試匯入 CSV、CTR／CVR／ROAS 計算與匯出。**查看成果資料夾**。需要修改直接告訴助理。」
 
 - **版本自動保存**：Gateway 透過 `WorkRequestPolicy` 為 `work_start`、`work_continue` 的 Worker 工作文字附加預設的「每個有意義、測過的完成階段安全 Git Commit」要求；助理不問使用者是否 Commit，也不自動 Merge 或 Push。它是對 Worker 的工作政策，仍需驗證 Git 實際提交。交付工具 `worker_delivery_link` 提供 `versionSaved`，只有工作分支相對 main 有新提交且工作目錄乾淨時才為 `true`。
-- **點擊開 Explorer**：完成後助理呼叫 `worker_delivery_link`，收到 `url` 後給使用者 **[查看成果資料夾]** 可點連結。連結限在**同一台 Windows 電腦**開啟；它是 24 小時內可使用一次的本機 capability，不能猜路徑、不能開其他專案。若專案不是由本 Gateway 受控建立，會明確拒絕，不偽造連結。點擊會在 Windows 端直接啟動 Explorer，不是要求使用者自己找深層路徑。
+- **本機資料夾直接交付（不用網址）**：助理交付工作時優先呼叫 `worker_delivery_open({jobId})`。Gateway 會按原版 Fleet 的 `work_status` **直接回傳物件**解析工作資訊，驗證這個工作真的屬於受控本機 Git Project／worktree，然後直接開啟 Windows Explorer，並回傳真實的絕對資料夾位置 `folderPath`、檔名、工作狀態與 Git 版本檢查結果。即使工作尚在執行，也可以查看已存在的檔案，但不能稱為驗收完成。只有需要從聊天**點擊**開 Explorer 時，才使用 `worker_delivery_link` 的 127.0.0.1 一次性備用入口；它不是雲端檔案連結，而且同樣回傳真實 `folderPath`。開啟 Explorer 不等於上傳檔案，也不要求使用者去找 Git 分支。原版 Fleet/T3 無須修改。
 - **所有助理共用 MCP、通知依 Webhook 配對分流**：第一次派工前，Session Router 問一次是否需要完成通知。使用者同意時，助理使用 `worker_notification_setup` 取得 Gateway 的本機設定頁，使用者在網頁輸入 Webhook URL 與 Key（不經聊天），Gateway 發出測試通知，接收端成功才加密保存。助理再呼叫 `worker_notification_pairing_status({setupId})`，取得隨機高熵的私有 `notificationRouteId` 並存入該助理的私有設定。**以後每次呼叫 `work_start`／`worker_task_start` 都帶該 `notificationRouteId`**；Gateway 記下 Job→Webhook 的對應後移除這個欄位，再呼叫未修改的原版 Fleet。不同助理可完全共用**同一個 3791 MCP 網址、同一把 MCP 金鑰**，靠不同配對 ID 分流通知，**無須各助理分別申請 MCP Token**。沒有配對 ID 就不自動通知。識別碼屬於私有路由能力，須由助理持久保存，若平台無法保存就不能保證跨聊天自動沿用。接收平台本身須支援將 Webhook 呈現在對應聊天，不是所有平台都自動有此功能。
 
 一般使用者不需要看到 Job ID、分支、Workspace、Commit ID 或上游 Token。技術識別碼只用於內部追蹤，必要時才展開。

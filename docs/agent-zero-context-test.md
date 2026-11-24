@@ -42,6 +42,12 @@ Expected:
 
 上述 GitHub CI 僅覆蓋模擬的 Fleet 和 Webhook；真實 GrokBot 跨聊天儲存識別碼、接收端真的回到其聊天室、Windows T3 路由及 Explorer 等需實機驗收。
 
+### Scenario A3 — 本機成果路徑與 Explorer 優先交付
+
+使用真正的原版 Fleet `work_status` 資料形狀（**直接的 structuredContent JobDetailView**），不能只以假的 `structuredContent.job` 測試。Worker 有 Git worktree 後，`worker_delivery_open` 應直接啟動受控 Windows Explorer，回傳正確的真實 `folderPath`、檔案和進度，不得因 `job.state !== idle` 而錯誤回報「尚未完成執行」。工作仍在運行時只說「可先查看目前檔案」，不能宣稱交付驗收完成。若使用者想自己點，`worker_delivery_link` 可以回傳實際 `folderPath` 及備用 localhost 點擊入口。若 Git Commit 狀態檢查失敗也不得阻止開啟已驗證的目錄。未知／不同專案／偽造 Job、錯誤工作分支仍必須拒絕開啟。
+
+實機須驗收 Windows 排程登入環境的 `explorer.exe` 能否出現在使用者桌面，和舊版一次性 URL 的點擊備援；GitHub CI 的模擬 `openFolder` 不等同真正桌面驗收。
+
 ### Scenario B — continuation
 
 Then say:

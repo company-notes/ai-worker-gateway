@@ -40,13 +40,13 @@
 
 若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。
 
-## 工作完成後：助理自選 Webhook、版本紀錄、點擊 Explorer
+## 工作完成後：助理自選 Webhook、版本紀錄、直接開 Explorer
 
 **Gateway 不再發 Windows 桌面通知。** 第一次派工時，Session Router 會先查詢這位助理的通知偏好，尚未設定才詢問「完成工作時要不要主動通知？」。使用者說不要則儲存拒絕偏好，不會自動推播；往後仍可直接問助理進度。
 
 新的 Session Router 在有 Git 的工作區會預設要求 Worker **每完成一段可驗證的工作就自行 Commit**，不問一般使用者，亦不擅自合併主分支。交付連結 `worker_delivery_link` 將 Git 提交狀態回報給助理，若尚未保存，助理應在同一工作中要求 Worker 補做，不讓使用者決定技術動作。
 
-助理核對交付物後可提供 **[查看成果資料夾]**，點擊 3791 的短效連結會打開這台 Windows 電腦的 Explorer。僅限 Gateway 管理的專案、真實工作分支與 Git worktree；其他電腦（包括手機）點擊 `127.0.0.1` 無法代替遠端檔案傳輸。
+新版交付以 **`worker_delivery_open({jobId})`** 為主：助理可以直接要求 3791 在安裝 Gateway 的 Windows 電腦開啟 Explorer，並拿到真實的 `folderPath`（本機絕對路徑）、檔名和版本檢查結果；**不必先等 `idle`，也不必產生 HTTP URL**。這解決了原先把原版 `work_status` 的 flat view 誤讀為 `structuredContent.job`、導致所有工作都錯誤回報「尚未完成」的問題。資料夾可查看不代表工作已完成，需獨立判斷 `readyForReview`。若助理平台需要讓使用者手動點擊，再以 `worker_delivery_link` 提供原本 127.0.0.1 短效一次性 Explorer 啟動入口，同時照樣回傳路徑。僅接受 Gateway 管理的 Git Project 和經 Git 核對的 Worktree；**不是雲端檔案連結**，手機或不同電腦無法直接使用本機 Explorer。真正的 Windows Explorer 啟動仍需在使用者登入的互動式桌面實機驗證。
 
 使用者說「要」時，助理呼叫 `worker_notification_setup({})` 取得短效設定頁 URL 和 `setupId`。使用者在本機網頁輸入 Webhook 接收 URL／Key；Gateway 測試成功才加密存檔，金鑰不進聊天。助理隨後呼叫 `worker_notification_pairing_status({setupId})` 取得**私有且隨機的 `notificationRouteId`**，保留在自己的可持久設定中。**以後 `work_start`、`worker_task_start` 每次新派工時附上此識別碼**；Gateway 驗證並記錄 Job→Webhook 路由，轉交給原版 Fleet 前會移除它。`work_continue` 延續原 Job 綁定，不必重新指定。**多個助理可共享原有的同一把 3791 MCP 金鑰及同一個 MCP 位址**，無須為 Sage、Noodle 或 GrokBot 內每位助理分開配 MCP。拒絕通知時 `worker_notification_decline` 會回傳應私下保存的「不通知」識別碼；不填／不配對就由使用者自己問進度。不具備私有持久設定的助理平台，可能在新聊天中需要重新配對。通知識別碼是私有能力，不等於可被共享用戶端安全認證的正式助理身分；接收端必須自己將 Webhook 呈現在使用者聊天中。詳見 [通用通知驗收](openmausbot-setup.md)。
 
