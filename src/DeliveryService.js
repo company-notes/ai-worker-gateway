@@ -20,11 +20,26 @@ export class DeliveryService {
     getTool() {
         return {
             name: 'worker_delivery_link',
-            description: 'After a Worker finishes a task in a managed local Git workspace, call with the REAL jobId to offer one simple clickable "查看成果資料夾" link. Clicking opens Windows Explorer on the Worker PC, without asking users about branches, worktrees or commits. Never invent paths or expose unrelated projects. The link lasts 24 hours, is single-use and only works in a browser on the same Windows PC.',
+            description: 'Offer a fallback clickable local Explorer link for a job in a verified managed Git workspace. No internet upload is involved; the response includes the REAL Windows folderPath even when the job is still running. Prefer worker_delivery_open for direct local Explorer handoff. Clicking opens Windows Explorer on the Worker PC, without asking users about branches, worktrees or commits. Never invent paths or expose unrelated projects. The link lasts 24 hours, is single-use and only works in a browser on the same Windows PC.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    jobId: { type: 'string', description: 'Real completed jobId from work_status' },
+                    jobId: { type: 'string', description: 'Real jobId from work_status (may be running or idle)' },
+                },
+                required: ['jobId'],
+                additionalProperties: false,
+            },
+        };
+    }
+
+    getOpenTool() {
+        return {
+            name: 'worker_delivery_open',
+            description: 'DIRECTLY OPEN the real local result folder in Windows Explorer for a verified managed worker job; no browser URL or HTTP link is needed. Returns the true absolute Windows folderPath, file names, and a separate progress/commit-check status. Safe to inspect while a job is still running; never claim finished just because files exist. Use for ordinary local handoff when the user asks to see their results.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    jobId: { type: 'string', description: 'Real worker jobId from work_status' },
                 },
                 required: ['jobId'],
                 additionalProperties: false,
@@ -137,17 +152,19 @@ export class DeliveryService {
         throw new Error('Could not verify the Worker job folder against its registered Git project.');
     }
 
-    async linkFor(args, listenPort) {
-        if (!args || Object.keys(args).length !== 1 ||
-            typeof args.jobId !== 'string' || !/^[0-9a-z]{6,32}$/.test(args.jobId)) {
+    async _inspectResult(args) {
+        if (!args || typeof args !== 'object' || Array.isArray(args) ||
+            Object.keys(args).length !== 1 || typeof args.jobId !== 'string' ||
+            !/^[0-9a-z]{6,32}$/.test(args.jobId)) {
             throw new Error('Expected one valid jobId from work_status.');
         }
 
         const response = await this.upstream.callTool('work_status', { jobId: args.jobId });
-        const job = response.structuredContent?.job;
-        if (!job || job.jobId !== args.jobId || job.state !== 'idle' ||
-            job.waitingOnDelegatedWork === true) {
-            throw new Error('This task has not finished its current execution, so no completed result is available yet.');
+        // Original Fleet returns its job detail DIRECTLY as structuredContent,
+        // not {job: ...}. Accept the nested historical mock shape as well.
+        const job = response.structuredContent?.job ?? response.structuredContent;
+        if (!job || job.jobId !== args.jobId) {
+            throw new Error('The requested Worker job was not found.');
         }
 
         const projectFolder = await this._managedProject(job);
@@ -155,15 +172,46 @@ export class DeliveryService {
         const items = await fileSystem.readdir(folder, { withFileTypes: true });
         const files = items.filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
             .slice(0, 30).map((entry) => entry.name);
+        let versionSaved = null;
+        let versionCheckError = null;
+        try {
+            const outstandingChanges = await this.runGit(folder, ['status', '--porcelain', '--untracked-files=all']);
+            const finishedCommits = Number(await this.runGit(folder, ['rev-list', '--count', 'main..HEAD']));
+            const trackedFiles = new Set((await this.runGit(folder, [
+                '-c', 'core.quotePath=false', 'ls-files', '-z',
+            ])).split('\0'));
+            versionSaved = !outstandingChanges && Number.isInteger(finishedCommits) &&
+                finishedCommits > 0 && files.length > 0 && files.every((file) => trackedFiles.has(file));
+        } catch {
+            versionCheckError = 'Git version check unavailable; folder contents remain accessible.';
+        }
 
-        const outstandingChanges = await this.runGit(folder, ['status', '--porcelain', '--untracked-files=all']);
-        const finishedCommits = Number(await this.runGit(folder, ['rev-list', '--count', 'main..HEAD']));
-        const trackedFiles = new Set((await this.runGit(folder, [
-            '-c', 'core.quotePath=false', 'ls-files', '-z',
-        ])).split('\0'));
-        const versionSaved = !outstandingChanges && Number.isInteger(finishedCommits) &&
-            finishedCommits > 0 && files.length > 0 && files.every((file) => trackedFiles.has(file));
+        return {
+            folder,
+            summary: {
+                label: '成果資料夾',
+                folderPath: folder,
+                title: job.title?.replace(/\s*\[job:[0-9a-z]+\]\s*$/, '') ?? '工作成果',
+                files,
+                state: job.state,
+                readyForReview: job.state === 'idle' && job.waitingOnDelegatedWork !== true,
+                versionSaved,
+                needsVersionSave: versionSaved === false,
+                ...(versionCheckError ? { versionCheckError } : {}),
+                note: 'Files are on the local Worker PC. A visible folder does not prove the task is finished; check readyForReview and verify the deliverables.',
+            },
+        };
+    }
 
+    async openFor(args) {
+        const result = await this._inspectResult(args);
+        await this.openFolder(result.folder);
+        return { ...result.summary, opened: true };
+    }
+
+    async linkFor(args, listenPort) {
+        const result = await this._inspectResult(args);
+        const { folder } = result;
         const token = randomBytes(24).toString('base64url');
         const now = Date.now();
         for (const [key, value] of this.tickets) {
@@ -177,14 +225,11 @@ export class DeliveryService {
 
         this.tickets.set(token, { folder, expires: now + ticketLifetimeMs });
         return {
+            ...result.summary,
             label: '查看成果資料夾',
             url: 'http://127.0.0.1:' + listenPort + '/open-delivery/' + token,
-            title: job.title?.replace(/\s*\[job:[0-9a-z]+\]\s*$/, '') ?? '已完成的工作',
-            files,
-            versionSaved,
-            needsVersionSave: !versionSaved,
             validForHours: 24,
-            note: 'Click this link on the same Windows PC to open the actual job folder in Explorer. It does not require a second password.',
+            note: 'Fallback clickable localhost link only: opens Explorer on the Worker PC. For direct handoff, call worker_delivery_open; no URL is needed.',
         };
     }
 
