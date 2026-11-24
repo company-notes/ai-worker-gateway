@@ -48,6 +48,12 @@ before(async () => {
         } else if (message.method === 'tools/call' && message.params.name === 'work_feed') {
             result = { content: [{ type: 'text', text: 'events' }],
                 structuredContent: { events: [], nextCursor: '0', hasMore: false } };
+        } else if (message.method === 'tools/call' && message.params.name === 'fleet_status') {
+            result = { content: [{ type: 'text', text: 'fleet' }], structuredContent: {
+                hosts: [{ id: 'my-pc', defaultProject: 'authorized-scratch', reachable: true }],
+                projects: [{ alias: 'authorized-scratch', host: 'my-pc',
+                    workspaceMode: 'scratch', allowWorkStart: true }],
+            } };
         } else {
             result = { content: [{ type: 'text', text: 'okay' }] };
         }
@@ -157,4 +163,19 @@ test('a route cannot reassign an existing job created for another assistant', as
     await assert.rejects(gateway.notifications.store.trackJob(
         gateway.notifications.resolveRoute(globalThis.testRoute), 'sharedjob2',
     ), /different assistant/);
+});
+
+test('wrapper worker_task_start also accepts the same private route and strips metadata from Fleet', async () => {
+    const result = await rpc('worker_task_start', {
+        task: 'Make another report', requestId: 'shared-helper-route',
+        notificationRouteId: globalThis.testRoute,
+    });
+    assert.equal(result.result.isError, false);
+    assert.equal(gateway.notifications.store.data.jobs.sharedjob4,
+        gateway.notifications.resolveRoute(globalThis.testRoute));
+    const calls = forwarded.filter((p) => p.params?.name === 'work_start');
+    const last = calls.at(-1);
+    assert.equal(last.params.arguments.notificationRouteId, undefined);
+    assert.equal(last.params.arguments.task.startsWith('Make another report'), true);
+    assert.deepEqual(last.params.arguments.target, { host: 'my-pc' });
 });
