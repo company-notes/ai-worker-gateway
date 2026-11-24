@@ -167,6 +167,52 @@ export class NotificationStore {
         return token;
     }
 
+    _routeHash(routeId) {
+        if (typeof routeId !== 'string' || !/^[a-f0-9]{64}$/.test(routeId)) {
+            throw new Error('Notification route identifier is invalid.');
+        }
+        return createHmac('sha256', this.secret).update('notification-route:' + routeId).digest('hex');
+    }
+
+    resolveRoute(routeId) {
+        const hashed = this._routeHash(routeId);
+        for (const [id, profile] of Object.entries(this.data.profiles)) {
+            if (typeof profile.routeHash === 'string' &&
+                profile.routeHash.length === hashed.length &&
+                timingSafeEqual(Buffer.from(profile.routeHash), Buffer.from(hashed))) {
+                return id;
+            }
+        }
+        throw new Error('Notification route is unknown. Pair the webhook again.');
+    }
+
+    async createRoute(settings) {
+        const routeId = randomBytes(32).toString('hex');
+        const profileId = randomUUID();
+        const routeHash = this._routeHash(routeId);
+        await this.change((state) => {
+            state.profiles[profileId] = {
+                name: settings.name,
+                routeHash,
+                tokenHash: null,
+                preference: settings.webhook ? 'on' : 'off',
+                webhook: settings.webhook ?? null,
+                enabledAt: settings.webhook ? new Date().toISOString() : null,
+            };
+        });
+        return routeId;
+    }
+
+    async declineRoute(routeId) {
+        if (routeId === undefined) {
+            return this.createRoute({ name: '助理', webhook: null });
+        }
+
+        const id = this.resolveRoute(routeId);
+        await this.setPreference(id, 'off');
+        return routeId;
+    }
+
     async trackJob(id, jobId) {
         if (!/^[0-9a-z]{6,32}$/.test(jobId)) {
             throw new Error('Invalid worker job reference.');
