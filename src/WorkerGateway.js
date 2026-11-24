@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { UpstreamMCPClient } from './UpstreamMCPClient.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { TaskDispatchService } from './TaskDispatchService.js';
@@ -32,14 +33,14 @@ export class WorkerGateway {
         response.end(JSON.stringify(body));
     }
 
-    _authenticatedAssistant(request) {
-        const authorization = request.headers.authorization;
-        if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
-            return null;
+    _isAuthorized(request) {
+        const provided = request.headers.authorization;
+        const expected = 'Bearer ' + this.config.clientToken;
+        if (typeof provided !== 'string' ||
+            Buffer.byteLength(provided) !== Buffer.byteLength(expected)) {
+            return false;
         }
-
-        const token = authorization.slice(7);
-        return this.notifications.identityFor(token);
+        return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
     }
 
     async _readPayload(request) {
@@ -116,7 +117,7 @@ export class WorkerGateway {
         return { jsonrpc: '2.0', id, result };
     }
 
-    async _handleExtension(payload, assistantId) {
+    async _handleExtension(payload) {
         const { name, arguments: args } = payload.params;
         try {
             if (this.taskDispatch.handles(name)) {
@@ -182,17 +183,26 @@ export class WorkerGateway {
         }
     }
 
-    async _handleMCP(payload, protocolVersion, assistantId) {
+    async _handleMCP(payload, protocolVersion) {
         const extensionNames = new Set(this._extensionTools().map((tool) => tool.name));
         if (payload.method === 'tools/call' && extensionNames.has(payload.params?.name)) {
-            const result = await this._handleExtension(payload, assistantId);
+            const result = await this._handleExtension(payload);
             return { status: 200, body: JSON.stringify(result), contentType: 'application/json' };
         }
 
         const directStart = payload.method === 'tools/call' && payload.params?.name === 'work_start';
-        const route = directStart
-            ? this._routeFromArguments(payload.params.arguments)
-            : { notificationRouteId: undefined, cleaned: null };
+        let route;
+        try {
+            route = directStart
+                ? this._routeFromArguments(payload.params.arguments)
+                : { notificationRouteId: undefined, cleaned: null };
+        } catch (error) {
+            return {
+                status: 200,
+                body: JSON.stringify(this._toolResult(payload.id, error.message, true)),
+                contentType: 'application/json',
+            };
+        }
         const forwarded = directStart && route.notificationRouteId
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
@@ -331,8 +341,7 @@ export class WorkerGateway {
             return;
         }
 
-        const assistantId = this._authenticatedAssistant(request);
-        if (!assistantId) {
+        if (!this._isAuthorized(request)) {
             response.setHeader('www-authenticate', 'Bearer');
             this._sendJSON(response, 401, { error: 'Authentication required' });
             return;
@@ -359,7 +368,7 @@ export class WorkerGateway {
             this._sendJSON(response, 400, { error: error.message });
             return;
         }
-        const result = await this._handleMCP(payload, request.headers['mcp-protocol-version'], assistantId);
+        const result = await this._handleMCP(payload, request.headers['mcp-protocol-version']);
         response.writeHead(result.status, {
             'content-type': result.contentType,
             'cache-control': 'no-store',
