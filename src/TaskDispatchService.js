@@ -45,7 +45,10 @@ export class TaskDispatchService {
                         },
                         title: { type: 'string', description: 'Optional short Job title.' },
                         notificationRouteId: {
-                            type: 'string', pattern: '^[a-f0-9]{64}
+                            type: 'string',
+                            pattern: '^[a-f0-9]{64}$',
+                            description: 'Private route returned by worker_notification_pairing_status. Never forwarded to original Fleet.',
+                        },
                     },
                     required: ['task', 'requestId'],
                     additionalProperties: false,
