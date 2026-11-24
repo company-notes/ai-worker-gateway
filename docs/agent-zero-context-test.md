@@ -32,15 +32,15 @@ Expected:
 - Agent starts one fresh job through the Gateway using `work_start` (or a safe exposed helper), with a new `requestId`, returns the real new Job ID and follows `work_status` / `work_messages`.
 - Check the delivered files or report, not just an `idle` state. Missing upstream model, policy, authorization or workspace is a **failure**, not something the assistant may invent.
 
-### Scenario A2 — 使用者自主選擇是否接收完成通知
+### Scenario A2 — 共用 MCP 的多助理 Webhook 分流
 
-在**未設定通知**的全新助理：派工開始後，Session Router 調用 `worker_notification_status` 看到 `unset`，問一次「完成時要不要主動通知？」。回答「不要」→ `worker_notification_decline` 保存偏好；完成工作時**不應收到任何自動推播**，下次派工也不再問。回答「要」→ `worker_notification_setup`，將一個短效設定頁交給使用者填 URL、Key，不把 Key 貼進聊天；Gateway 必須先向接收端發測試事件，只有收到成功回覆才保存啟用。重新派第二份工作，應自動重用原來的 Webhook，不需要重新問或重填。
+用同一個 MCP URL、同一個 3791 連線金鑰建立兩個新助理（模擬 GrokBot）。兩位助理各先問使用者是否要完成通知；同意後各自呼叫 `worker_notification_setup`，讓使用者在本機頁面填寫不同 Webhook 接收 URL／Key；接收端必須先通過測試事件。助理各使用對應的 `setupId` 呼叫 `worker_notification_pairing_status`，取得不同的私有 `notificationRouteId`，存入各自可持久設定。
 
-多位助理測試：在設定頁為第二位助理建立一組新的 3791 MCP 金鑰（不是第二條 MCP），同一位助理的工作只通知它自己的 Webhook。若兩個助理共用同一組金鑰，**不得聲稱能分辨它們**。停用其中一位助理的通知不能停止另一位。回呼必須由接收助理實際呈現在自己的聊天／通知中；沒有接收端能力時不得假裝可以跨平台送訊息。
+在每次 `work_start`／`worker_task_start` 派工參數帶上正確 `notificationRouteId`，Gateway 記錄各 Job 的通知路由，移除額外參數再轉交原版 Fleet。兩個任務完成時，Webhook A 只收到 A 任務、Webhook B 只收到 B 任務。使用假 ID 或已停用 ID 派工必須**在呼叫原版 work_start 之前失敗**。沒有 ID 的派工不應自動通知任何助理。原工作 `work_continue` 仍保留已綁定的路由，不重新分配。
 
-助理交付文字只應有工作名稱、功能摘要、品質檢查和 **查看成果資料夾** 連結，不能在主回覆要求使用者理解或操作 Job ID／worktree／branch／Commit。透過 `worker_delivery_link` 的 `versionSaved` 檢查 Worker 是否真的 Commit；若不是，繼續**同一 Job**請 Worker 保存版本，而不是詢問使用者。點擊 3791 本機 capability 連結，必須打開 Explorer 中驗證過的真實工作資料夾，而不是 Git 根目錄或其他無關目錄。
+使用者說不要時 `worker_notification_decline` 返回一個停用路由識別碼供助理私下記錄，後續不反覆問、也不推播。不支援私有持久設定的助理可能需要重新配對，不可宣稱永遠記得。確認所有助理仍只用同一個 MCP 金鑰，完全不修改 T3/Fleet、也不依賴 Windows 桌面通知或特定 Bot Routine。
 
-這些都需要真實接收平台的 Webhook、Windows T3 和 Explorer 實機驗收；CI 只能驗證隔離的 HTTPS/localhost 測試服務、加密儲存及假 T3 狀態，不能證明 OpenMausBot 或任意其他助理平台已替使用者收到聊天通知。
+上述 GitHub CI 僅覆蓋模擬的 Fleet 和 Webhook；真實 GrokBot 跨聊天儲存識別碼、接收端真的回到其聊天室、Windows T3 路由及 Explorer 等需實機驗收。
 
 ### Scenario B — continuation
 

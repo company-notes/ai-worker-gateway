@@ -17,15 +17,17 @@ OpenMausBot 的 Skill 會按需求觸發，是「可用的程序」，**不是**
 
 這是**給專職派工 Bot 的一次性角色設定**，不是每次使用者都要重述的聊天 Prompt。若使用者要一個可獨立在本機開發的混合型 Bot，這份固定角色指令不適用；不能只靠 Skill 保證它自動優先派工。也可依所用 AI 引擎的可用工具權限，減少本地寫檔／Shell 能力，但不能假設 OpenMausBot 所有引擎都支援同一種原生工具封鎖。
 
-## 通用 Webhook 完成通知（任何支援 Webhook 的助理）
+## 通用 Webhook 通知：同一條 MCP，按配對識別碼分流
 
-1. **第一次交辦時詢問一次**：Bot 在成功派工後呼叫 `worker_notification_status`。若 `preference=unset`，問使用者「完成時要不要自動通知？」；若使用者說不要，呼叫 `worker_notification_decline` 保存偏好，以後不反覆詢問，沒有通知就由使用者自己查進度。
-2. **使用者說要才設定**：Bot 若有正式能力建立自己平台的 Webhook 接收端，可代使用者建立一條持續可用的回呼網址；若平台沒有此能力，不能捏造網址。呼叫 `worker_notification_setup`，把回傳的本機設定連結交給使用者；在本機瀏覽器輸入 Webhook URL、金鑰（可選擇 Authorization Bearer 或 X-Webhook-Key 等標頭）。**這些機密資訊不經過 Bot 聊天**，Gateway 先送 `work.webhook_test`，接收端回覆 2xx 後才啟用並加密保存。只要已啟用，相同助理以後的工作沿用同一條 Webhook。
-3. **多個助理要分流**：不同助理不得共用同一組 3791 MCP 金鑰，否則 Gateway 無法辨識來源。設定頁可替其他助理建立專用連線，會在瀏覽器**只顯示一次**新的 MCP 金鑰；把那一組填進該助理**既有同一個** `http://127.0.0.1:3791/mcp` 連線即可。沒有第二個 Gateway，也不需要告訴使用者 Job ID。
-4. **Webhook 事件**：Gateway 在背景監控自己派出的工作，只把事件送到該助理的固定接收端。JSON 包含 `schema`、`deliveryId`、`event`（例如 `work.turn_finished`／`work.needs_input`／`work.failed`）、`assistant`、`task`、`jobId`、`state`、`occurredAt`、`message`。`jobId` 讓接收助理內部查詢詳細內容，不應呈現給一般使用者。接收端須自行處理重試去重（`X-AWG-Event-ID`）以及回到使用者聊天室／App 的通知；Gateway 不會繞過不同平台的 Webhook API。
-5. **驗收**：結束聊天後讓 Worker 再完成一輪；接收端應收到一則 webhook。使用者在該助理上看到的應是「行銷工具這一輪已結束，請查看成果」，不是 Windows 桌面提示，也不能把 `idle` 當作已驗收成功。拒絕設定通知的助理不得收到事件。關閉 Windows 或 Gateway 時不能宣稱即時推播，恢復後會從持久事件位置繼續檢查。
+這個機制**不依賴 MCP 連線是否專屬某位助理**。例如 GrokBot 所有助理共用同一條 3791 MCP 和同一把授權金鑰，也能設定不同通知接收端。
 
-通知可獨立於 OpenMausBot 使用；這份檔案僅以 OpenMausBot 作為示範助理。若某平台不支援 Webhook 接收，這個功能就必須坦白回報不可用，**不要轉而預設使用該平台 Routine 或 Windows 桌面提示**。
+1. **使用者先決定**：第一次交辦前，助理查是否已有自己私下保存的 `notificationRouteId`；有的話呼叫 `worker_notification_status({notificationRouteId})`，沒有則使用 `worker_notification_status({})`。未配對時問一次「以後完成工作要不要主動通知？」。選「不要」呼叫 `worker_notification_decline({})`，把回傳的停用路由 ID 私下保存；以後不反覆問、不推播。不保存 ID 的助理不能保證下次聊天仍記得這個決定。
+2. **配對 Webhook**：使用者同意才呼叫 `worker_notification_setup({})`；工具回傳 `url`（本機設定頁）及 `setupId`（此配對的短效識別碼）。只把設定頁連結給使用者，讓使用者在本機輸入 Webhook 接收 URL 和 Key，不能要求把 Key 貼到聊天；Gateway 先測試接收端成功回覆 2xx 才加密保存。接收平台必須真的支援接收 Webhook。
+3. **把路由 ID 交回助理**：使用者完成網頁設定後，助理透過 `worker_notification_pairing_status({setupId})` 取回 `paired=true` 與高熵 `notificationRouteId`，並儲存在**助理自己可跨聊天使用的私有設定**中。不應在一般人可見的工作報告中顯示識別碼，也不能讓使用者在 MCP 設定裡手動輸入。
+4. **每次派工指定要通知誰**：助理呼叫原本的 `work_start` 或 Gateway `worker_task_start`，把自己的 `notificationRouteId` 作為額外參數傳給 3791。Gateway 驗證後保存這項工作與 Webhook 的配對、**刪掉額外參數**再傳給原版 Fleet；後續通知按 Job 記錄分流，既有工作續作不必改路由。沒有 ID 時不發自動通知，不可以因所有助理共用 MCP 金鑰就猜某個預設通知目的地。
+5. **驗收**：例如 Sage、Noodle 共用同一 MCP：讓二位助理各配自己的 Webhook，分別派工，兩個接收端應只收到自己的完成事件。停用 Sage 不應影響 Noodle；假的／停用 ID 必須在建立 Worker Job **之前**被拒絕。接收端需用 `X-AWG-Event-ID` 做去重。`idle` 代表一輪已停止，不一定等於成果已驗證。接收平台須有把 Webhook 傳回自己聊天的能力，不能把接收成功當作聊天已通知成功。
+
+**安全界線**：`notificationRouteId` 是難以猜測的路由能力，而不是共用 MCP 上可信的助理身分；如果其他共用客戶端拿到這個 ID，可能冒用此路由。需將 ID 保存在助理的私有設定、避免在共享日誌或使用者文字中外露；若需求包含防止惡意助理互相冒用，還需額外的可信身分驗證。原版 T3／Fleet 不必修改。
 
 ## 無歷史盲測
 

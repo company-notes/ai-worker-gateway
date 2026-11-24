@@ -48,7 +48,7 @@
 
 助理核對交付物後可提供 **[查看成果資料夾]**，點擊 3791 的短效連結會打開這台 Windows 電腦的 Explorer。僅限 Gateway 管理的專案、真實工作分支與 Git worktree；其他電腦（包括手機）點擊 `127.0.0.1` 無法代替遠端檔案傳輸。
 
-使用者同意時，助理呼叫 `worker_notification_setup` 回傳短效本機網址 **[設定完成通知]**，使用者在這個 3791 的網頁輸入自己助理服務提供的 Webhook URL、Key（不貼在聊天裡）。Gateway 發送測試事件且接收端回覆成功後，將設定加密保存，往後同一位助理所有工作重用相同 Webhook。外部目的地必須用 HTTPS，只有同機 `http://127.0.0.1` 可使用 HTTP。每個助理都應使用不同的 3791 MCP 連線金鑰以分隔通知；設定頁可建立另一位助理的唯一 MCP 金鑰。**每位助理仍然只連接同一條 3791 MCP、只使用一把金鑰。** Gateway 傳送標準 Webhook，接收端必須具備將事件顯示在該助理的聊天／通知能力，與 OpenMausBot 是否支援 Routine 無關。詳見 [通用通知驗收說明](openmausbot-setup.md)。
+使用者說「要」時，助理呼叫 `worker_notification_setup({})` 取得短效設定頁 URL 和 `setupId`。使用者在本機網頁輸入 Webhook 接收 URL／Key；Gateway 測試成功才加密存檔，金鑰不進聊天。助理隨後呼叫 `worker_notification_pairing_status({setupId})` 取得**私有且隨機的 `notificationRouteId`**，保留在自己的可持久設定中。**以後 `work_start`、`worker_task_start` 每次新派工時附上此識別碼**；Gateway 驗證並記錄 Job→Webhook 路由，轉交給原版 Fleet 前會移除它。`work_continue` 延續原 Job 綁定，不必重新指定。**多個助理可共享原有的同一把 3791 MCP 金鑰及同一個 MCP 位址**，無須為 Sage、Noodle 或 GrokBot 內每位助理分開配 MCP。拒絕通知時 `worker_notification_decline` 會回傳應私下保存的「不通知」識別碼；不填／不配對就由使用者自己問進度。不具備私有持久設定的助理平台，可能在新聊天中需要重新配對。通知識別碼是私有能力，不等於可被共享用戶端安全認證的正式助理身分；接收端必須自己將 Webhook 呈現在使用者聊天中。詳見 [通用通知驗收](openmausbot-setup.md)。
 
 ## OpenMausBot 的 Skill 啟用不可省略
 
