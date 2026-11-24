@@ -1,6 +1,6 @@
 ---
 name: session-router
-description: 當使用者要求製作工具、網站、程式、報告、行銷素材、查詢進度或修改先前工作時，先走 Worker Gateway MCP 派工或續作；完成後用一般人聽得懂的語言、可點擊的成果資料夾、背景完成通知交付；Git 階段版本自動保存，不要求使用者決定 Commit。
+description: 用自然語言派工製作工具、網站、程式、行銷分析與報告，查詢或修改已有工作；使用 AI Worker Gateway MCP。首次派工詢問使用者要不要自動通知，願意才透過 Gateway 通用 Webhook 設定頁記錄每位助理的 URL 與金鑰；沒設定就按需查詢，不做 Windows 桌面提示。完成後提供可點擊的成果資料夾並自動保存 Git 階段版本。
 ---
 
 # Session Router — Gateway-neutral work routing
@@ -22,11 +22,13 @@ description: 當使用者要求製作工具、網站、程式、報告、行銷�
 - **直接開資料夾**：查實際工作 `work_status`，待完成且交付物已核對後，若單一 3791 MCP 提供 `worker_delivery_link`，用真的 Job ID 呼叫它，將回傳的 `url` 做成 Markdown **[查看成果資料夾](url)**。使用者點擊後會在**同一台 Windows Worker 電腦**開啟 Explorer。網址是短期、一次性連結；過期時重新呼叫工具產生新連結。不要假造 `file://` 或 Windows 檔案連結，也不要把內部資料夾任意映射成公開 HTTP 網站。
 - **Git 預設自動保存**：讓 Worker 在有 Git 的執行環境中，每完成一段可驗證的成果就安全 Commit 一次，最終交付前也要完成 Commit；只提交本次工作實際修改的檔案，不覆蓋或混入其他未完成變更。不 Push、不 Merge、不改 main，除非使用者明確交辦。**絕對不要問一般使用者「要不要 Commit？」** 使用者不滿意時繼續修改、再保存新版本。如果沒有 Git 或 Commit 失敗，就如實說明，不假稱版本已保存。
 
-## 背景自動通知：必須有真正的執行者
+## 完成通知：使用者決定、Webhook 一次設定、跨助理通用
 
-- Windows 上，已升級的 AI Worker Gateway 可在背景以原版 `work_feed` 偵測自己派出的工作狀態變化，並在登入中的本機桌面顯示系統提示。**`idle` 代表這一輪停止，不是驗收完成**；提示只說「這輪處理已結束，請查看成果」，除非完成品質檢查。
-- **要把結果主動送回 OpenMausBot 聊天**，不能只在聊天裡承諾。若目前 Bot 支援建立自己的 OpenMausBot **Routines／背景例行工作**，第一次成功派工時建立一次「Worker 工作結果提醒」（已存在就重用，不要每個 Job 建一個）：每約 5 分鐘透過唯一的 3791 MCP 讀 `work_feed`，保存 `nextCursor`（可用 Routine 的 Remember the last run），只處理上次後的新事件；新完成／需輸入／失敗才呼叫 `work_status`、查驗成果並發一則**簡短結果到 Bot 主聊天**。初次執行先記住目前 cursor，避免把所有舊工作重發；勾選 App 啟動時補查（若支援），並在檢查正常時保持安靜。不要在已結束的聊天中假裝仍會自行繼續執行。
-- 若這個 Bot/引擎無法建立或啟用 Routine，**如實回報目前只有 Windows 桌面通知，OpenMausBot 聊天的自動推播尚未設好**；不可宣稱「完成後我會回來通知」卻沒有背景執行者。沒有接收端時不能直接修改 OpenMausBot 私有資料庫、繞過原有權限或洩漏 webhook 金鑰。
+1. **首次交辦時只問一次**：先呼叫 `worker_notification_status`；如果 `preference=unset`，照常先派工作，再用一句人話問：「這位助理以後完成工作時，要主動通知你嗎？設定一次即可；不設定也可以隨時問我進度。」**不要自行預設同意**。`preference=off` 代表使用者已拒絕，不再反覆問；`preference=on` 代表已設定並沿用同一個 Webhook，不要每個工作重新建立。
+2. **使用者回答不要**：呼叫 `worker_notification_decline` 保存設定；Gateway 不推播，只在使用者主動問時查 `work_status` 等工具。不要在 Windows 桌面顯示通知，也不要另外設定特定助理平台的 Routine。
+3. **使用者回答要**：若這種助理提供官方 Webhook 接收端建立工具，先由助理依該平台正式授權能力建立**一個可供未來工作重用**的 Webhook 接收端；沒有這種能力就如實說明需要提供接收 URL 和 Key。呼叫 `worker_notification_setup`，把 Gateway 回傳的 **[設定完成通知](url)** 連結給使用者，讓使用者在 Gateway 的**本機網頁**填 Webhook URL 和 Key。**不要要求使用者把通知 Key 貼到聊天，也不要猜測任何平台的接收網址**。Gateway 在保存前會測試接收端，成功才視為啟用。
+4. **不同助理分開通知**：一位助理固定使用一個 Webhook，往後自動沿用。不同助理要真正隔離，**每個助理的 3791 MCP 連線要有自己唯一的一把金鑰**；Gateway 設定頁可替其他助理產生專屬 MCP 金鑰供設定到**原本同一條** 3791 MCP 連線，沒有第二條 MCP。若兩位助理共用同一把 MCP 金鑰，Gateway 只能視作同一個身分、無法保證分流，請先完成獨立連線設定。Webhook URL、金鑰只存在 Gateway 加密儲存中。
+5. **真正的自動推播**：Gateway 背景查詢該助理派出的工作事件並傳送 Webhook，助理無須持續輪詢。但 Webhook 必須由接收平台真的接受，並且由該平台的 Webhook 處理器負責把事件顯示在使用者的通知／聊天中；Gateway 不會魔法般直接在不支援 Webhook 的任意助理裡說話。`idle` 只表示這一輪停止，通知是「本輪結束，請查驗成果」，不是未驗證就宣稱完全完成。接收端可使用事件的內部工作參照自行查 `work_status`／`work_messages`，面向使用者只顯示工作名稱、進度和成果。
 
 ## 不可混淆的概念
 
@@ -42,7 +44,7 @@ description: 當使用者要求製作工具、網站、程式、報告、行銷�
 4. 對獨立新工作，檢查 fleet_status、fleet_projects 或同等 Workspace 發現能力，選擇**適合任務且已授權**的執行目的地。新話題不必然建立新的 Project；已有適當 Workspace 時，在同一 Workspace 開新的 Job。
 5. 如果找不到合適的執行空間，先檢查 Gateway 是否提供且管理員已啟用 `worker_workspace_ensure`（或等價的受控 Workspace Provisioning）。若有，為這個獨立工作取穩定且具區辨性的英文小寫 slug，呼叫 `worker_workspace_ensure({name, requestId, title?})`；若新專案尚無已核准的預設模型，先讀 `fleet_models` 選擇精確的 Provider／模型，作為 `worker_workspace_ensure` 的 `modelSelection`；Gateway 會驗證模型與選項。只有回傳 `dispatchReady: true`，才使用回傳的 `target` 與可選 `modelSelection` 派工。`worker_workspace_prepare` 只建立資料夾，不能作為已註冊 Project。若缺少 Host、模型、Fleet 的新專案權限、Git 或註冊能力，明確回報阻斷；不能暗中落到 Pilot、無關客戶 Project 或任意 Scratch。
 6. 確認合法目的地之後，透過 Gateway 呼叫 `work_start` 或它公開的等價能力，傳入完整工作、可驗收成果、限制和唯一 requestId。除非使用者明確另有要求，Worker 需於每個完成階段安全保存 Git 版本；Gateway 自己也會為工作訊息附帶版本保存政策。發生不確定回覆時重試必須使用**同一 requestId 和相同參數**，避免重複 Job。
-7. 拿到真正的 Job ID 後，依『背景自動通知』章節確保一次性的提醒機制已配置。用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆、實際交付物與是否已保存 Git 版本；未保存且可以續作時由助理請 Worker 在原工作安全完成 Commit，不要請一般使用者決定。成果確認後呼叫 worker_delivery_link（若可用）產生真正可點擊的 Explorer 連結。需核准或輸入時如實回報，不得假稱自動完成。
+7. 拿到真正的 Job ID 後，依『完成通知』章節核對通知偏好：尚未問過就問一次，已拒絕不追問、已設定就沿用，不強迫使用者等待設定才派工。用 work_status／work_messages／work_feed（或等價工具）追蹤；idle 只代表本輪停止，應查驗回覆、實際交付物與是否已保存 Git 版本；未保存且可以續作時由助理請 Worker 在原工作安全完成 Commit，不要請一般使用者決定。成果確認後呼叫 worker_delivery_link（若可用）產生真正可點擊的 Explorer 連結。需核准或輸入時如實回報，不得假稱自動完成。
 8. 若要跨不同 Worker 或公司團隊交接，依正式工作系統與成果路徑移交；不要假設兩台機器可以共享同一個底層 Thread。
 
 ## 可選 Gateway 快捷工具

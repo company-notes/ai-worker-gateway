@@ -10,13 +10,18 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     const header = source.match(/^---\n([\s\S]*?)\n---\n/);
     assert.ok(header, 'Skill must have frontmatter for real skill discovery');
     assert.match(header[1], /^name: session-router$/m);
-    assert.match(header[1], /description:.*行銷素材.*Worker Gateway MCP/);
+    assert.match(header[1], /description:.*行銷分析.*AI Worker Gateway MCP/);
     assert.match(source, /先使用 Gateway MCP 的唯讀工具核對現有 Job 與 Workspace/);
     assert.match(source, /不要先呼叫本機.*mkdir/);
     assert.match(source, /如果這個 Bot 的 Gateway MCP 沒有啟用/);
     assert.match(source, /絕對不要問一般使用者「要不要 Commit？」/);
     assert.match(source, /worker_delivery_link/);
-    assert.match(source, /Routines／背景例行工作/);
+    assert.match(source, /worker_notification_status/);
+    assert.match(source, /worker_notification_setup/);
+    assert.match(source, /worker_notification_decline/);
+    assert.match(source, /不要自行預設同意/);
+    assert.match(source, /每個助理的 3791 MCP 連線要有自己唯一的一把金鑰/);
+    assert.doesNotMatch(source, /OpenMausBot.*Routine|Windows 桌面顯示通知.*Windows桌面提醒/);
     assert.match(source, /不以 Job ID、Host、Workspace/);
 });
 
