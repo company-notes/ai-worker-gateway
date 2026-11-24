@@ -6,7 +6,7 @@ const skillURL = new URL('../.agents/skills/session-router/SKILL.md', import.met
 const guideURL = new URL('../docs/openmausbot-setup.md', import.meta.url);
 
 test('Session Router skill is discoverable for a new marketing work assignment, not only MCP-specific requests', async () => {
-    const source = await readFile(skillURL, 'utf8');
+    const source = (await readFile(skillURL, 'utf8')).replace(/\r\n/g, '\n');
     const header = source.match(/^---\n([\s\S]*?)\n---\n/);
     assert.ok(header, 'Skill must have frontmatter for real skill discovery');
     assert.match(header[1], /^name: session-router$/m);
