@@ -8,8 +8,8 @@ This is the actual product requirement: a **brand-new assistant with no access t
 2. Provide one authorized route. The preferred new-workspace test is the new **opt-in local provisioning** (`AWG_WORKSPACE_ROOT` + `AWG_PROVISION_HOST` and a verified launch model when needed), where the Session Router can call `worker_workspace_ensure`, then the official `work_start`. Existing alternatives are:
    - **Persistent work:** create/register a dedicated T3 project in the original supported system, configure it as a Fleet alias such as `general-work`, check its model, Git/workspace mode and `allowWorkStart`, then set `AWG_GENERAL_PROJECT=general-work` in the wrapper's launch environment; or
    - **One-off scratch work:** configure an official, verified `hosts[].defaultProject` scratch alias with `workspaceMode: "scratch"` and pinned real T3 scratch project id. The upstream must support this capability. See [the official upstream instructions](https://github.com/boundsj/t3-fleet-gateway/blob/main/docs/configuration.md#no-named-project).
-3. Grant **the wrapper's upstream Fleet client** Operate access to that destination, and keep the assistant's distinct inbound `AWG_CLIENT_TOKEN` unchanged. Do not give the assistant the upstream Fleet token.
-4. Restart **only 3791** after changing `AWG_GENERAL_PROJECT` or `AWG_UPSTREAM_TOKEN`. It should retain the existing 3790/3773 services and data.
+3. For a standard locally installed Windows Fleet Gateway, run the new `Install-WorkerGateway.ps1`, which internally creates and encrypts a host-scoped Fleet Operate grant. The assistant only sees one inbound `AWG_CLIENT_TOKEN` for port 3791; no user-visible second key. Do not copy internal tokens into a chat or the bot's MCP settings.
+4. Re-run the Windows installer when internal grant policy changes; it owns the 3791 scheduled-task restart. It preserves existing 3790/3773 services and data.
 
 Without local provisioning or a suitable existing destination the gateway must **refuse** arbitrary work rather than use an unrelated `pilot`, FileShare or ffl-mcp project. `worker_workspace_prepare` alone is **not** sufficient: it never registers a T3 Project.
 

@@ -7,7 +7,7 @@ OpenMausBot 的來源：[Skills](https://docs.openmausbot.com/docs/features/skil
 ## 必須完成的兩項真正安裝
 
 1. 在 **OpenMausBot 的新 Bot → Bot Settings → Skills**，匯入 `session-router`，貼入整份 `SKILL.md` 內容（**不是**貼檔案路徑）。安裝器目前會把這份文字檔匯出到 `%LOCALAPPDATA%\AIWorkerGateway\skills\session-router\SKILL.md`；它不會代替 OpenMausBot 啟用 Skill。匯入後預設是關閉的，務必切換為 **On**，並確認新 Bot 可見。若使用共享 Skills Library，亦須將它指派並啟用給這位 Bot；同名的 Bot 專屬／Library Skill 可能遮蔽其他版本。
-2. 在 **Bot Settings → Tools → Access → MCP servers** 選擇唯一的 `local-3791` Gateway。管理員在 OpenMausBot 全域設定的 MCP 連線不等於新 Bot 自動持有其工具權限。用 MCP Server 管理畫面 **Test** 核對返回工具（至少應看見 `fleet_status`、`work_list`、`worker_workspace_ensure` 與 `work_start`）。不要把 `3790` 設成第二個 Bot MCP，也不要把上游 Fleet Token 當作 3791 的 Client Token。
+2. 在 **Bot Settings → Tools → Access → MCP servers** 選擇唯一的 `local-3791` Gateway。管理員在 OpenMausBot 全域設定的 MCP 連線不等於新 Bot 自動持有其工具權限。用 MCP Server 管理畫面 **Test** 核對返回工具（至少應看見 `fleet_status`、`work_list`、`worker_workspace_ensure` 與 `work_start`）。不要把 `3790` 設成第二個 Bot MCP，也一般安裝現在**完全不需要使用者管理或看到上游 Fleet Token**。只有一把 3791 Client Token 需要在 OpenMausBot MCP 的金鑰欄位設定。
 
 ## 專職派工 Bot：固定角色指令（建議）
 
