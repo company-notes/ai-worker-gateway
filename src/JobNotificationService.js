@@ -32,73 +32,116 @@ export class JobNotificationService {
     }
 
     getTools() {
+        const routeProperty = {
+            notificationRouteId: {
+                type: 'string',
+                description: 'Opaque route handle returned after webhook pairing. Keep it in this assistant’s private settings, never display it as a user-facing job ID. Multiple assistants may share the SAME MCP credential.',
+                pattern: '^[a-f0-9]{64}$',
+            },
+        };
         return [
             {
                 name: 'worker_notification_status',
-                description: 'Read this assistant connection’s persistent opt-in notification preference. Ask once whether the user wants automatic notifications when preference is unset. Do not ask again if off or on. No extra MCP key is needed.',
-                inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+                description: 'Read notification settings for an explicitly paired notificationRouteId. With no handle, the assistant is unpaired; ask the user once whether to enable callbacks.',
+                inputSchema: {
+                    type: 'object', properties: routeProperty, additionalProperties: false,
+                },
             },
             {
                 name: 'worker_notification_setup',
-                description: 'Only after the user agrees to automatic notifications, get a one-time local URL to securely enter their assistant webhook URL and key. Never request or show the key in chat. One webhook is saved per assistant connection; configuration remains reusable for later jobs.',
+                description: 'After the user opts in, get a local setup URL and setupId. The user enters webhook URL and secret in the local browser. Call worker_notification_pairing_status with setupId after the page is saved; securely retain the returned notificationRouteId for future dispatches. No separate MCP credentials.',
                 inputSchema: { type: 'object', properties: {}, additionalProperties: false },
             },
             {
+                name: 'worker_notification_pairing_status',
+                description: 'Check a pending setupId after the user has submitted the local form. On successful webhook test, returns one opaque notificationRouteId for THIS assistant to include in future work_start / worker_task_start calls.',
+                inputSchema: {
+                    type: 'object', properties: {
+                        setupId: { type: 'string', pattern: '^[A-Za-z0-9_-]{32}$' },
+                    }, required: ['setupId'], additionalProperties: false,
+                },
+            },
+            {
                 name: 'worker_notification_decline',
-                description: 'When the user says no or disables notifications, save that preference for this assistant. No callbacks will be sent. The user can still ask for job progress normally.',
-                inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+                description: 'The user declined automatic alerts or disabled their existing webhook route. Returns or preserves an opaque notificationRouteId so the assistant can remember the decision; no callback will be sent.',
+                inputSchema: { type: 'object', properties: routeProperty, additionalProperties: false },
             },
         ];
     }
 
-    status(profileId) {
-        const profile = this.store.profileFor(profileId);
-        if (!profile || !this.store.active) {
-            return { enabled: false, preference: 'unavailable', detail: 'Webhook settings are not enabled on this Gateway.' };
+    resolveRoute(routeId) {
+        if (routeId === undefined) {
+            return null;
         }
+        if (!this.store.active) {
+            throw new Error('Webhook notification storage is not enabled.');
+        }
+        const id = this.store.resolveRoute(routeId);
+        const profile = this.store.profileFor(id);
+        if (profile.preference !== 'on' || !profile.webhook) {
+            throw new Error('Notification route is disabled. Cannot bind new work to it.');
+        }
+        return id;
+    }
 
+    status(routeId) {
+        if (!this.store.active) {
+            return { enabled: false, preference: 'unavailable' };
+        }
+        if (routeId === undefined) {
+            return { enabled: false, preference: 'unset',
+                detail: 'No notification route has been paired for this assistant. Ask once whether the user wants automatic updates.' };
+        }
+        const id = this.store.resolveRoute(routeId);
+        const profile = this.store.profileFor(id);
         return {
-            enabled: profile.preference === 'on' && profile.webhook !== null,
+            enabled: profile.preference === 'on' && !!profile.webhook,
             preference: profile.preference,
             assistant: profile.name,
             detail: profile.preference === 'on'
-                ? 'This assistant connection already has a reusable webhook.'
-                : profile.preference === 'off'
-                    ? 'User declined automatic notifications; ask for progress manually.'
-                    : profile.preference === 'pending'
-                        ? 'The user opted in but has not completed the local webhook form. Do not send notifications; provide a fresh setup link on request and let the user ask for progress.'
-                        : 'Ask the user once whether they want automatic task notifications.',
+                ? 'The assistant can reuse this routeId when dispatching work.'
+                : 'The user declined automatic updates. Do not ask again unless they change their preference.',
         };
     }
 
-    async decline(profileId) {
-        await this.store.setPreference(profileId, 'off');
-        return this.status(profileId);
+    async decline(routeId) {
+        const value = await this.store.declineRoute(routeId);
+        return { notificationRouteId: value, ...this.status(value) };
     }
 
-    async setup(profileId, port) {
-        if (!this.store.active || !this.store.profileFor(profileId)) {
-            throw new Error('Gateway webhook storage is not available.');
+    setup(port) {
+        if (!this.store.active) {
+            throw new Error('Gateway webhook storage is not enabled.');
         }
         const nonce = randomBytes(24).toString('base64url');
         const now = Date.now();
-        for (const [value, item] of this.tickets) {
-            if (item.expiresAt <= now) {
-                this.tickets.delete(value);
+        for (const [key, value] of this.tickets) {
+            if (value.expiresAt <= now) {
+                this.tickets.delete(key);
             }
         }
         if (this.tickets.size >= 50) {
-            throw new Error('Too many unused notification setup links.');
+            throw new Error('Too many unused webhook pairing links.');
         }
-        if (this.store.profileFor(profileId).preference !== 'on') {
-            await this.store.setPreference(profileId, 'pending');
-        }
-        this.tickets.set(nonce, { profileId, expiresAt: now + setupTtlMs });
+        this.tickets.set(nonce, { expiresAt: now + setupTtlMs, notificationRouteId: null, name: null });
         return {
             url: 'http://127.0.0.1:' + port + '/notifications/setup/' + nonce,
+            setupId: nonce,
             label: '設定完成通知',
-            instruction: 'Open on the Windows Worker PC. Enter webhook URL and key on the secure local page, not in chat. Each assistant uses one reusable webhook. To isolate separate assistants, the page can generate a dedicated single MCP connection key for the other assistant.',
+            instruction: 'The user fills the URL and key in the local form. After successful pairing, call worker_notification_pairing_status with setupId to obtain a private reusable route handle. All assistants keep their existing shared MCP connection key.',
             validForMinutes: 10,
+        };
+    }
+
+    pairingStatus(setupId) {
+        const ticket = this._ticket(setupId);
+        if (!ticket.notificationRouteId) {
+            return { paired: false, detail: 'Webhook form not yet submitted successfully.' };
+        }
+        return {
+            paired: true, assistant: ticket.name,
+            notificationRouteId: ticket.notificationRouteId,
+            detail: 'Save this route handle in private assistant configuration; include it with every future new task. Do not show it to the user.',
         };
     }
 
@@ -116,26 +159,22 @@ export class JobNotificationService {
 
     renderSetup(nonce) {
         const ticket = this._ticket(nonce);
-        const profile = this.store.profileFor(ticket.profileId);
-        const name = html(profile.name);
+        if (ticket.notificationRouteId) {
+            return this._page('通知已配對', '<h1>通知已設定</h1><p>已驗證 Webhook 接收端。請回到助理，讓助理完成配對確認。</p>');
+        }
+
         const action = '/notifications/setup/' + nonce;
-        const separate = ticket.profileId === 'default'
-            ? '<label><input type="radio" name="mode" value="new"> 為另一位助理建立獨立連線（會產生該助理唯一的一組 MCP 金鑰）</label>'
-            : '';
         return this._page('設定完成通知', '<h1>設定完成通知</h1>' +
-            '<p>目前連線：<strong>' + name + '</strong>。一位助理設定一次，往後所有工作沿用；不設定就不會自動通知。</p>' +
+            '<p>請輸入這位助理自己的通知接收位址與金鑰。所有助理可以共用原本的 MCP 連線，每位助理只需配對一次。</p>' +
             '<form method="POST" action="' + action + '">' +
-            '<label><input type="radio" name="mode" value="current" checked> 為目前助理設定通知</label>' + separate +
-            '<label>助理名稱<input name="name" maxlength="60" required value="' + name + '"></label>' +
+            '<label>助理名稱<input name="name" maxlength="60" required placeholder="例如 Sage"></label>' +
             '<label>Webhook 網址<input name="url" type="url" maxlength="2000" placeholder="https://..." required></label>' +
             '<label>金鑰標頭<select name="header"><option value="Authorization">Authorization: Bearer</option>' +
             '<option value="X-Webhook-Key">X-Webhook-Key</option><option value="X-API-Key">X-API-Key</option>' +
             '<option value="X-Webhook-Secret">X-Webhook-Secret</option></select></label>' +
             '<label>Webhook 金鑰<input name="secret" type="password" maxlength="2048" autocomplete="off" required></label>' +
-            '<p>網址、金鑰只送回這台電腦的 Gateway 並加密保存，不會傳給聊天助理。</p>' +
-            '<button type="submit">儲存並啟用通知</button></form>' +
-            '<form method="POST" action="' + action + '"><input type="hidden" name="mode" value="off">' +
-            '<button type="submit">不要自動通知</button></form>');
+            '<p>Webhook 資料只會加密保存在本機 Gateway；不會出現在助理聊天，也不會更動 MCP 金鑰。</p>' +
+            '<button type="submit">測試並儲存通知</button></form>');
     }
 
     _page(title, content) {
@@ -148,44 +187,39 @@ export class JobNotificationService {
 
     async submitSetup(nonce, fields) {
         const ticket = this._ticket(nonce);
-        const mode = fields.get('mode');
-        let result;
-        if (mode === 'off') {
-            await this.store.setPreference(ticket.profileId, 'off');
-            result = this._page('通知已關閉', '<h1>不會自動通知</h1><p>之後可以直接問助理目前做得如何。</p>');
-        } else {
-            const name = String(fields.get('name') ?? '').trim();
-            if (!name || name.length > 60 || /[\r\n<>]/.test(name)) {
-                throw new Error('助理名稱不合法。');
-            }
-            const webhook = validateWebhook({
-                url: fields.get('url'), header: fields.get('header'), secret: fields.get('secret'),
-            });
-            await this.sender.deliver(webhook, {
-                schema: 'ai-worker-gateway.webhook.v1',
-                deliveryId: 'test-' + randomBytes(12).toString('hex'),
-                event: 'work.webhook_test', assistant: name,
-                task: '通知連線測試', jobId: null, state: 'test',
-                occurredAt: new Date().toISOString(),
-                message: '這是一則測試通知，確認這個 Webhook 能接收完成提醒。',
-            });
-            if (mode === 'new' && ticket.profileId === 'default') {
-                const token = await this.store.createAssistant({ name, webhook });
-                result = this._page('助理連線已建立', '<h1>' + html(name) + ' 的通知已設定</h1>' +
-                    '<p>要分開不同助理的通知，請把以下這組<strong>唯一的 MCP 連線金鑰</strong>貼到該助理現有的 3791 MCP 設定。只顯示這一次。</p>' +
-                    '<p><code>' + html(token) + '</code></p><p>MCP 網址不變：<code>http://127.0.0.1:3791/mcp</code>。</p>');
-            } else if (mode === 'current') {
-                await this.store.configure(ticket.profileId, { name, webhook });
-                result = this._page('通知設定成功', '<h1>完成通知已啟用</h1><p>這位助理往後會重複使用同一個 Webhook；不必每項工作再填一次。</p>');
-            } else {
-                throw new Error('無法判定要設定的助理。');
-            }
+        if (ticket.notificationRouteId) {
+            throw new Error('This webhook pairing was already completed.');
         }
-        this.tickets.delete(nonce);
-        return result;
+
+        const name = String(fields.get('name') ?? '').trim();
+        if (!name || name.length > 60 || /[\r\n<>]/.test(name)) {
+            throw new Error('助理名稱不合法。');
+        }
+        const webhook = validateWebhook({
+            url: fields.get('url'), header: fields.get('header'), secret: fields.get('secret'),
+        });
+        await this.sender.deliver(webhook, {
+            schema: 'ai-worker-gateway.webhook.v1',
+            deliveryId: 'test-' + randomBytes(12).toString('hex'),
+            event: 'work.webhook_test', assistant: name,
+            task: '通知連線測試', jobId: null, state: 'test',
+            occurredAt: new Date().toISOString(),
+            message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
+        });
+
+        const notificationRouteId = await this.store.createRoute({ name, webhook });
+        ticket.notificationRouteId = notificationRouteId;
+        ticket.name = name;
+        return this._page('通知設定成功', '<h1>Webhook 配對成功</h1>' +
+            '<p>請回到助理。助理會完成配對確認並在後續派工時自動使用這條通知路線。</p>' +
+            '<p>原有 MCP 連線及其共用金鑰都不需要改動。</p>');
     }
 
-    async trackJob(profileId, response) {
+    async trackJob(routeId, response) {
+        if (routeId === undefined) {
+            return;
+        }
+        const profileId = this.resolveRoute(routeId);
         const job = response?.structuredContent?.job;
         if (jobIdPattern.test(job?.jobId) && response?.isError !== true) {
             await this.store.trackJob(profileId, job.jobId);
