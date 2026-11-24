@@ -78,6 +78,7 @@ export class WorkerGateway {
             ...this.taskDispatch.getTools(),
             this.provision.getTool(),
             this.deliveries.getTool(),
+            this.deliveries.getOpenTool(),
             ...this.notifications.getTools(),
             {
                 name: 'worker_workspace_plan',
@@ -153,8 +154,10 @@ export class WorkerGateway {
                     structuredContent: value, isError: false,
                 });
             }
-            if (name === 'worker_delivery_link') {
-                const value = await this.deliveries.linkFor(args, this.server.address().port);
+            if (name === 'worker_delivery_link' || name === 'worker_delivery_open') {
+                const value = name === 'worker_delivery_open'
+                    ? await this.deliveries.openFor(args)
+                    : await this.deliveries.linkFor(args, this.server.address().port);
                 return this._extensionResult(payload.id, {
                     content: [{ type: 'text', text: JSON.stringify(value) }],
                     structuredContent: value,
@@ -222,7 +225,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Ask once whether the user wants callbacks; if yes use worker_notification_setup, let the user fill the local webhook form, then call worker_notification_pairing_status with setupId and PRIVATELY retain the 64-character notificationRouteId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. When work_status is idle, inspect real deliverables and offer worker_delivery_link.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Ask once whether the user wants callbacks; if yes use worker_notification_setup, let the user fill the local webhook form, then call worker_notification_pairing_status with setupId and PRIVATELY retain the 64-character notificationRouteId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
