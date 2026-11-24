@@ -14,9 +14,11 @@ $ErrorActionPreference = 'Stop'
 if ($HostId -notmatch '^[a-z0-9][a-z0-9-]{0,31}$') {
     throw 'Host ID must be a configured local Fleet host.'
 }
+
 if (-not (Test-Path -LiteralPath $FleetCliPath -PathType Leaf)) {
     throw 'Installed Fleet CLI not found. The local Fleet service must be installed first.'
 }
+
 if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
     throw 'Node.js executable not found.'
 }
@@ -69,6 +71,7 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
         $issuedToken = $lines[$i + 1].Trim()
     }
 }
+
 if ($null -eq $header -or
     $issuedToken -notmatch '^[A-Za-z0-9._~-]{24,512}$') {
     throw 'Fleet CLI output did not contain exactly one supported operate credential; no token was accepted.'
