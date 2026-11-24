@@ -97,7 +97,7 @@ if ($PlanOnly) {
         skillSource = $sourceSkill
         changesUpstream = $false
         createsWorkspaceProject = $false
-        enablesProvisioning = [bool]($EnableProvisioning -or $ProvisionHost)
+        enablesProvisioning = [bool](-not $NoProvisioning -and ($EnableProvisioning -or $ProvisionHost))
     }
     return
 }
