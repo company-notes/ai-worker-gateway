@@ -38,7 +38,7 @@
 
 **不再需要手動替 `omb-pilot-test` 升權。** 本機安裝器會建立自己的 Host 限定 Operate Grant，不更改原有 Pilot 測試 Client，也不改變其他 Bot 的授權。管理員應了解：持有 **3791 Client Token** 的本機助理，現在可執行此 Host 許可的工作；若不想讓某位 Bot 使用，請在那位 Bot 的 OpenMausBot MCP Access 關閉 `local-3791`。
 
-若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟其擁有的排程**，不動原版 3790／3773。若有另一個未知程序佔用 3791，安裝器會拒絕接管，請先確認程序來源。
+若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。
 
 ## OpenMausBot 的 Skill 啟用不可省略
 
@@ -78,6 +78,6 @@ Skill 是路由決策程序，不是授權或執行器。
 
 ## 目前仍未做到
 
-這個初版腳本以「**已經有可用的原版 3790**」為前提；尚未做從全新電腦自動部署、配對及設定原版 Fleet 的完整流程、非 Git 執行工作區、第三方助理 Skills UI 自動啟用，或 Windows 登入前真正的 OS Service。**受控本機 T3 Git Project Provisioning 與本機 Fleet 內部 Operate Grant 自動配置已加入程式碼，仍須在真實 Windows + T3 + Fleet 實際驗收。完全乾淨的 Windows 電腦自動安裝原版 Fleet 尚未完成，不可宣稱一條指令可從只有 T3/Node 自動部署完整的 3790/3791。**Windows CI 目前只做腳本解析、無副作用 PlanOnly、DPAPI 測試；實機註冊排程、重開機登入驗證仍需在使用者測試機完成。
+這個初版腳本以「**已經有可用的原版 3790**」為前提；尚未做從全新電腦自動部署、配對及設定原版 Fleet 的完整流程、非 Git 執行工作區、第三方助理 Skills UI 自動啟用，或 Windows 登入前真正的 OS Service。**受控本機 T3 Git Project Provisioning 與本機 Fleet 內部 Operate Grant 自動配置已加入程式碼，仍須在真實 Windows + T3 + Fleet 實際驗收。完全乾淨的 Windows 電腦自動安裝原版 Fleet 尚未完成，不可宣稱一條指令可從只有 T3/Node 自動部署完整的 3790/3791。**Windows CI 覆蓋腳本解析、無副作用 PlanOnly、DPAPI，以及**實際 Node 監聽程序**的安全停止／拒絕停止無關程序；實機的排程服務生命週期、登入重啟與完整 T3 Job 流程仍需使用者測試機驗證。
 
 自然語言驗收詳見 agent-zero-context-test.md。
