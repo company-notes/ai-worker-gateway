@@ -1,6 +1,6 @@
 ---
 name: session-router
-description: 當使用者交辦工具、網站、報告或修改工作時，透過 AI Worker Gateway MCP 路由派工。需要自動通知時，助理與 Webhook 配對取得私有 notificationRouteId，在未來派工時帶上該識別碼；不同助理共用同一 MCP 連線和金鑰也能分流。完成後交付可點擊資料夾並自動保存 Git 版本，不要求使用者理解 Job ID。
+description: 當使用者交辦工具、網站、行銷分析、報告或修改工作時，透過 AI Worker Gateway MCP 路由派工。需要自動通知時，助理與 Webhook 配對取得私有 notificationRouteId，在未來派工時帶上該識別碼；不同助理共用同一 MCP 連線和金鑰也能分流。完成後交付可點擊資料夾並自動保存 Git 版本，不要求使用者理解 Job ID。
 ---
 
 # Session Router — Gateway-neutral work routing
