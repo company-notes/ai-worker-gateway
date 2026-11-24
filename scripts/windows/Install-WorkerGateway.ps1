@@ -286,7 +286,20 @@ if (Test-LoopbackPort 3791) {
         Start-Sleep -Milliseconds 500
     }
     if (Test-LoopbackPort 3791) {
-        throw 'The owned scheduled task was stopped but port 3791 remains occupied. Diagnose the unknown process before retrying.'
+        if ($null -eq $existing -or -not $existing.repoRoot -or -not $existing.nodePath) {
+            throw 'Cannot prove which Gateway process owns 3791 because its previous installation settings are missing.'
+        }
+
+        $stopScript = Join-Path $PSScriptRoot 'Stop-OwnedWorkerGateway.ps1'
+        $oldEntrypoint = Join-Path ([string]$existing.repoRoot) 'src\main.js'
+        & $stopScript -NodePath ([string]$existing.nodePath) -Entrypoint $oldEntrypoint -ListenPort 3791
+
+        for ($attempt = 0; $attempt -lt 20 -and (Test-LoopbackPort 3791); $attempt++) {
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-LoopbackPort 3791) {
+            throw 'Port 3791 is still occupied after stopping the verified Gateway process. Refusing to stop any other service.'
+        }
     }
 }
 
