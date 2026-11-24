@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fileSystem } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const runCommand = promisify(execFile);
-const ticketLifetimeMs = 5 * 60 * 1000;
+const ticketLifetimeMs = 24 * 60 * 60 * 1000;
 const maxTickets = 100;
 
 export class DeliveryService {
@@ -20,7 +20,7 @@ export class DeliveryService {
     getTool() {
         return {
             name: 'worker_delivery_link',
-            description: 'After a Worker finishes a task in a managed local Git workspace, call with the REAL jobId to offer one simple clickable "查看成果資料夾" link. Clicking opens Windows Explorer on the Worker PC, without asking users about branches, worktrees or commits. Never invent paths or expose unrelated projects. The link lasts five minutes, is single-use and only works in a browser on the same Windows PC.',
+            description: 'After a Worker finishes a task in a managed local Git workspace, call with the REAL jobId to offer one simple clickable "查看成果資料夾" link. Clicking opens Windows Explorer on the Worker PC, without asking users about branches, worktrees or commits. Never invent paths or expose unrelated projects. The link lasts 24 hours, is single-use and only works in a browser on the same Windows PC.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -45,13 +45,27 @@ export class DeliveryService {
         if (process.platform !== 'win32') {
             throw new Error('Opening Windows Explorer is available only on a Windows Worker.');
         }
-        await runCommand('explorer.exe', [folder], { windowsHide: false, timeout: 15_000 });
+        await new Promise((resolve, reject) => {
+            const child = spawn('explorer.exe', [folder], {
+                detached: true, stdio: 'ignore', windowsHide: false,
+            });
+            child.once('error', reject);
+            child.once('spawn', () => {
+                child.unref();
+                resolve();
+            });
+        });
     }
 
     async _managedProject(job) {
         if (!this.config.workspaceRoot || !this.config.provisionHost ||
             job.host !== this.config.provisionHost || !job.projectId) {
             throw new Error('This result is not in a managed local Worker workspace.');
+        }
+
+        const rootStatus = await fileSystem.lstat(this.config.workspaceRoot);
+        if (!rootStatus.isDirectory() || rootStatus.isSymbolicLink()) {
+            throw new Error('Managed workspace root is not a regular directory.');
         }
 
         const root = await fileSystem.realpath(this.config.workspaceRoot);
@@ -165,7 +179,7 @@ export class DeliveryService {
             files,
             versionSaved,
             needsVersionSave: !versionSaved,
-            validForMinutes: 5,
+            validForHours: 24,
             note: 'Click this link on the same Windows PC to open the actual job folder in Explorer. It does not require a second password.',
         };
     }
