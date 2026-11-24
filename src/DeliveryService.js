@@ -141,6 +141,11 @@ export class DeliveryService {
         const items = await fileSystem.readdir(folder, { withFileTypes: true });
         const files = items.filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
             .slice(0, 30).map((entry) => entry.name);
+
+        const outstandingChanges = await this.runGit(folder, ['status', '--porcelain', '--untracked-files=all']);
+        const finishedCommits = Number(await this.runGit(folder, ['rev-list', '--count', 'main..HEAD']));
+        const versionSaved = !outstandingChanges && Number.isInteger(finishedCommits) && finishedCommits > 0;
+
         const token = randomBytes(24).toString('base64url');
         const now = Date.now();
         for (const [key, value] of this.tickets) {
@@ -158,6 +163,8 @@ export class DeliveryService {
             url: 'http://127.0.0.1:' + listenPort + '/open-delivery/' + token,
             title: job.title?.replace(/\s*\[job:[0-9a-z]+\]\s*$/, '') ?? '已完成的工作',
             files,
+            versionSaved,
+            needsVersionSave: !versionSaved,
             validForMinutes: 5,
             note: 'Click this link on the same Windows PC to open the actual job folder in Explorer. It does not require a second password.',
         };

@@ -83,6 +83,8 @@ test('a completed marketing tool gives a one-click local Explorer link, not a jo
     assert.equal(result.isError, false);
     assert.equal(result.structuredContent.label, '查看成果資料夾');
     assert.ok(result.structuredContent.files.includes('roas-tracker.html'));
+    assert.equal(result.structuredContent.versionSaved, false,
+        'An uncommitted deliverable must never be claimed as a saved version.');
     assert.match(result.structuredContent.url, /^http:\/\/127\.0\.0\.1:\d+\/open-delivery\/[A-Za-z0-9_-]{32}$/);
 
     const opened = await fetch(result.structuredContent.url);
@@ -109,6 +111,15 @@ test('local folder links reject nonmanaged projects, busy jobs and forged or unk
     const privateMCP = await fetch(environment.address + '/mcp', { method: 'POST' });
     assert.equal(privateMCP.status, 401);
     assert.equal(environment.opens.length, countBefore);
+});
+
+test('a worker checkpoint becomes a saved version only after a real job-branch commit', async () => {
+    await runCommand('git', ['-C', environment.worktree, 'add', 'roas-tracker.html']);
+    await runCommand('git', ['-C', environment.worktree, 'commit', '-m', 'Deliver marketing tracker']);
+
+    const response = await environment.requestLink();
+    assert.equal(response.structuredContent.versionSaved, true);
+    assert.equal(response.structuredContent.needsVersionSave, false);
 });
 
 test('an unrelated directory on the same disk must not be accepted as the output workspace', async () => {
