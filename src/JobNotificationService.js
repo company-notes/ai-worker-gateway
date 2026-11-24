@@ -156,6 +156,14 @@ export class JobNotificationService {
             const webhook = validateWebhook({
                 url: fields.get('url'), header: fields.get('header'), secret: fields.get('secret'),
             });
+            await this.sender.deliver(webhook, {
+                schema: 'ai-worker-gateway.webhook.v1',
+                deliveryId: 'test-' + randomBytes(12).toString('hex'),
+                event: 'work.webhook_test', assistant: name,
+                task: '通知連線測試', jobId: null, state: 'test',
+                occurredAt: new Date().toISOString(),
+                message: '這是一則測試通知，確認這個 Webhook 能接收完成提醒。',
+            });
             if (mode === 'new' && ticket.profileId === 'default') {
                 const token = await this.store.createAssistant({ name, webhook });
                 result = this._page('助理連線已建立', '<h1>' + html(name) + ' 的通知已設定</h1>' +

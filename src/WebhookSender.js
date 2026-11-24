@@ -62,7 +62,6 @@ export function validateWebhook(webhook) {
 export class WebhookSender {
     constructor(options = {}) {
         this.resolve = options.resolve ?? lookup;
-        this.send = options.send ?? null;
     }
 
     async _resolveAddress(url) {

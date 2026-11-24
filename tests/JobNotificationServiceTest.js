@@ -28,10 +28,10 @@ before(async () => {
         for await (const chunk of request) {
             data.push(chunk);
         }
-        alerts.push({
-            header: request.headers.authorization,
-            body: JSON.parse(Buffer.concat(data).toString('utf8')),
-        });
+        const body = JSON.parse(Buffer.concat(data).toString('utf8'));
+        if (body.event !== 'work.webhook_test') {
+            alerts.push({ header: request.headers.authorization, body });
+        }
         response.writeHead(204);
         response.end();
     });
