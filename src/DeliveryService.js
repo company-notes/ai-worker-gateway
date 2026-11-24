@@ -62,7 +62,7 @@ export class DeliveryService {
             }
 
             const projectFolder = path.join(root, candidate.name);
-            if (await fileSystem.realpath(projectFolder) !== projectFolder) {
+            if ((await fileSystem.lstat(projectFolder)).isSymbolicLink()) {
                 continue;
             }
             const markerFile = path.join(projectFolder, '.awg-provision.json');

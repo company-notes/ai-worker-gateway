@@ -131,7 +131,7 @@ test('assistant discovers upstream tools and extensions, starts an upstream job,
     assert.deepEqual(tools.body.result.tools.map((tool) => tool.name), [
         'work_start', 'work_status', 'work_continue',
         'worker_task_plan', 'worker_task_start', 'worker_workspace_ensure',
-        'worker_workspace_plan', 'worker_workspace_prepare',
+        'worker_delivery_link', 'worker_workspace_plan', 'worker_workspace_prepare',
     ], 'Agent should see upstream and local tools through one endpoint');
 
     const start = await environment.client.request('tools/call', { name: 'work_start', arguments: { task: 'Create a report' } });

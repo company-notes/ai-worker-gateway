@@ -4,6 +4,7 @@ import { UpstreamMCPClient } from './UpstreamMCPClient.js';
 import { WorkspaceService } from './WorkspaceService.js';
 import { TaskDispatchService } from './TaskDispatchService.js';
 import { WorkspaceProvisionService } from './WorkspaceProvisionService.js';
+import { DeliveryService } from './DeliveryService.js';
 
 export class WorkerGateway {
     constructor(config, services = {}) {
@@ -12,6 +13,7 @@ export class WorkerGateway {
         this.workspaces = new WorkspaceService(config.workspaceRoot);
         this.taskDispatch = new TaskDispatchService(this.upstream, config.generalProject);
         this.provision = new WorkspaceProvisionService(config, this.workspaces, this.upstream, services.projectAdapter);
+        this.deliveries = new DeliveryService(config, this.upstream, { openFolder: services.openFolder });
         this.server = createServer((request, response) => {
             this._handleRequest(request, response).catch((error) => {
                 console.error('Worker Gateway request failed:', error.message);
@@ -61,6 +63,7 @@ export class WorkerGateway {
         return [
             ...this.taskDispatch.getTools(),
             this.provision.getTool(),
+            this.deliveries.getTool(),
             {
                 name: 'worker_workspace_plan',
                 description: 'Inspect an approved local workspace slug without modifying files. It does not create a T3 Project.',
@@ -104,6 +107,14 @@ export class WorkerGateway {
         try {
             if (this.taskDispatch.handles(name)) {
                 return this._extensionResult(payload.id, await this.taskDispatch.run(name, args));
+            }
+            if (name === 'worker_delivery_link') {
+                const value = await this.deliveries.linkFor(args, this.server.address().port);
+                return this._extensionResult(payload.id, {
+                    content: [{ type: 'text', text: JSON.stringify(value) }],
+                    structuredContent: value,
+                    isError: false,
+                });
             }
             if (name === 'worker_workspace_ensure') {
                 const value = await this.provision.ensure(args);
@@ -168,14 +179,42 @@ export class WorkerGateway {
         return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
     }
 
+    async _openDeliveryLink(request, response, pathname) {
+        const port = this.server.address().port;
+        const host = '127.0.0.1:' + port;
+        const remote = request.socket.remoteAddress;
+        if (request.headers.host !== host ||
+            !['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) ||
+            request.headers.origin) {
+            this._sendJSON(response, 403, { error: 'This link can only be opened locally.' });
+            return;
+        }
+
+        response.setHeader('referrer-policy', 'no-referrer');
+        response.setHeader('content-security-policy', "default-src 'none'; sandbox");
+        response.setHeader('x-content-type-options', 'nosniff');
+        try {
+            await this.deliveries.openTicket(pathname.slice('/open-delivery/'.length));
+            response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+            response.end('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>成果資料夾</title><p>已在這台電腦開啟成果資料夾，可以關閉此頁。</p></html>');
+        } catch {
+            this._sendJSON(response, 410, { error: 'This link is unavailable. Ask the assistant for a new folder link.' });
+        }
+    }
+
     async _handleRequest(request, response) {
+        const pathname = new URL(request.url, 'http://localhost').pathname;
+        if (request.method === 'GET' && pathname.startsWith('/open-delivery/')) {
+            await this._openDeliveryLink(request, response, pathname);
+            return;
+        }
+
         if (!this._isAuthorized(request)) {
             response.setHeader('www-authenticate', 'Bearer');
             this._sendJSON(response, 401, { error: 'Authentication required' });
             return;
         }
 
-        const pathname = new URL(request.url, 'http://localhost').pathname;
         if (pathname === '/healthz' && request.method === 'GET') {
             this._sendJSON(response, 200, { healthy: true, upstreamChecked: false });
             return;
