@@ -7,7 +7,6 @@ const version = 1;
 export class NotificationStore {
     constructor(config) {
         this.directory = config.notificationStateDirectory ?? null;
-        this.masterToken = config.clientToken;
         this.secret = config.notificationStorageKey ?? config.clientToken;
         this.file = this.directory ? path.join(this.directory, 'assistant-webhooks.enc.json') : null;
         this.key = createHmac('sha256', this.secret).update('awg-webhook-store-v1').digest();
@@ -21,29 +20,6 @@ export class NotificationStore {
 
     get active() {
         return this.directory !== null;
-    }
-
-    _digest(token) {
-        return createHmac('sha256', this.secret).update('client:' + token).digest('hex');
-    }
-
-    identityFor(token) {
-        if (typeof token !== 'string') {
-            return null;
-        }
-        const first = Buffer.from(token);
-        const master = Buffer.from(this.masterToken);
-        if (first.length === master.length && timingSafeEqual(first, master)) {
-            return 'default';
-        }
-
-        const hash = this._digest(token);
-        for (const [id, profile] of Object.entries(this.data.profiles)) {
-            if (profile.tokenHash === hash) {
-                return id;
-            }
-        }
-        return null;
     }
 
     _seal(data) {
@@ -153,18 +129,6 @@ export class NotificationStore {
             profile.preference = 'on';
             profile.enabledAt = new Date().toISOString();
         });
-    }
-
-    async createAssistant(settings) {
-        const token = randomBytes(32).toString('hex');
-        const profileId = randomUUID();
-        await this.change((state) => {
-            state.profiles[profileId] = {
-                name: settings.name, tokenHash: this._digest(token), preference: 'on',
-                webhook: settings.webhook, enabledAt: new Date().toISOString(),
-            };
-        });
-        return token;
     }
 
     _routeHash(routeId) {

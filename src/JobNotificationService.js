@@ -27,10 +27,6 @@ export class JobNotificationService {
         await this.store.load();
     }
 
-    identityFor(token) {
-        return this.store.identityFor(token);
-    }
-
     getTools() {
         const routeProperty = {
             notificationRouteId: {
