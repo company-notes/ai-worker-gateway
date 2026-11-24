@@ -24,7 +24,7 @@ description: 用自然語言派工製作工具、網站、程式、行銷分析�
 
 ## 完成通知：使用者決定、Webhook 一次設定、跨助理通用
 
-1. **首次交辦時只問一次**：先呼叫 `worker_notification_status`；如果 `preference=unset`，照常先派工作，再用一句人話問：「這位助理以後完成工作時，要主動通知你嗎？設定一次即可；不設定也可以隨時問我進度。」**不要自行預設同意**。`preference=off` 代表使用者已拒絕，不再反覆問；`preference=on` 代表已設定並沿用同一個 Webhook，不要每個工作重新建立。
+1. **首次交辦時只問一次**：先呼叫 `worker_notification_status`；如果 `preference=unset`，照常先派工作，再用一句人話問：「這位助理以後完成工作時，要主動通知你嗎？設定一次即可；不設定也可以隨時問我進度。」**不要自行預設同意**。`preference=off` 代表使用者已拒絕，不再反覆問；`preference=pending` 代表已同意但尚未填完設定頁，**沒有自動推播，不再重問意願**，使用者願意再設定時才重新提供設定連結；`preference=on` 代表已完成設定並沿用同一個 Webhook，不要每個工作重新建立。
 2. **使用者回答不要**：呼叫 `worker_notification_decline` 保存設定；Gateway 不推播，只在使用者主動問時查 `work_status` 等工具。不要在 Windows 桌面顯示通知，也不要另外設定特定助理平台的 Routine。
 3. **使用者回答要**：若這種助理提供官方 Webhook 接收端建立工具，先由助理依該平台正式授權能力建立**一個可供未來工作重用**的 Webhook 接收端；沒有這種能力就如實說明需要提供接收 URL 和 Key。呼叫 `worker_notification_setup`，把 Gateway 回傳的 **[設定完成通知](url)** 連結給使用者，讓使用者在 Gateway 的**本機網頁**填 Webhook URL 和 Key。**不要要求使用者把通知 Key 貼到聊天，也不要猜測任何平台的接收網址**。Gateway 在保存前會測試接收端，成功才視為啟用。
 4. **不同助理分開通知**：一位助理固定使用一個 Webhook，往後自動沿用。不同助理要真正隔離，**每個助理的 3791 MCP 連線要有自己唯一的一把金鑰**；Gateway 設定頁可替其他助理產生專屬 MCP 金鑰供設定到**原本同一條** 3791 MCP 連線，沒有第二條 MCP。若兩位助理共用同一把 MCP 金鑰，Gateway 只能視作同一個身分、無法保證分流，請先完成獨立連線設定。Webhook URL、金鑰只存在 Gateway 加密儲存中。
