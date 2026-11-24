@@ -13,7 +13,8 @@ $scripts = @(
     'Show-WorkerGatewayClientToken.ps1',
     'Uninstall-WorkerGateway.ps1',
     'Register-T3Project.ps1',
-    'New-ManagedFleetGrant.ps1'
+    'New-ManagedFleetGrant.ps1',
+    'Stop-OwnedWorkerGateway.ps1'
 )
 
 foreach ($file in $scripts) {
@@ -94,6 +95,68 @@ process.stdout.write('Token ID: abc\n');
     }
 } finally {
     Remove-Item -LiteralPath $fixture -Force -Recurse -ErrorAction SilentlyContinue
+}
+
+# Scenario: stopping the scheduled task leaves its node.exe child listening.
+# A real Node socket owner must be stopped only if every ownership check matches.
+$processTestRoot = Join-Path $env:TEMP ('awg-stop-test-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $processTestRoot | Out-Null
+$gatewayProcess = $null
+$unrelatedProcess = $null
+try {
+    $entrypointFolder = Join-Path $processTestRoot 'src'
+    New-Item -ItemType Directory -Path $entrypointFolder | Out-Null
+    $entrypoint = Join-Path $entrypointFolder 'main.js'
+    $unrelatedEntrypoint = Join-Path $entrypointFolder 'unrelated.js'
+    $gatewayPort = Get-Random -Minimum 48000 -Maximum 58000
+    $unrelatedPort = Get-Random -Minimum 58000 -Maximum 63000
+    $gatewayCode = "require('node:net').createServer(() => {}).listen($gatewayPort, '127.0.0.1');"
+    $unrelatedCode = "require('node:net').createServer(() => {}).listen($unrelatedPort, '127.0.0.1');"
+    [IO.File]::WriteAllText($entrypoint, $gatewayCode, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($unrelatedEntrypoint, $unrelatedCode, (New-Object Text.UTF8Encoding($false)))
+    $gatewayProcess = Start-Process -FilePath $node -ArgumentList ('"' + $entrypoint + '"') -WindowStyle Hidden -PassThru
+    $unrelatedProcess = Start-Process -FilePath $node -ArgumentList ('"' + $unrelatedEntrypoint + '"') -WindowStyle Hidden -PassThru
+
+    $ready = $false
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        $gatewayListeners = @(Get-NetTCPConnection -LocalPort $gatewayPort -State Listen -ErrorAction SilentlyContinue)
+        $unrelatedListeners = @(Get-NetTCPConnection -LocalPort $unrelatedPort -State Listen -ErrorAction SilentlyContinue)
+        if ($gatewayListeners.Count -gt 0 -and $unrelatedListeners.Count -gt 0) {
+            $ready = $true
+            break
+        }
+        Start-Sleep -Milliseconds 150
+    }
+    if (-not $ready) { throw 'Fixture Node servers never reached listening state.' }
+
+    $stopScript = Join-Path $PSScriptRoot 'Stop-OwnedWorkerGateway.ps1'
+    $blocked = $false
+    try {
+        & $stopScript -NodePath $node -Entrypoint $entrypoint -ListenPort $unrelatedPort
+    } catch {
+        $blocked = $true
+    }
+    if (-not $blocked -or $unrelatedProcess.HasExited) {
+        throw 'The installer must refuse to stop an unrelated Node listener.'
+    }
+
+    & $stopScript -NodePath $node -Entrypoint $entrypoint -ListenPort $gatewayPort | Out-Null
+    if (-not $gatewayProcess.WaitForExit(5000)) {
+        throw 'Stopping the installer-owned Gateway must also terminate its listening Node process.'
+    }
+    if ($unrelatedProcess.HasExited) {
+        throw 'Stopping the owned Gateway must preserve unrelated services.'
+    }
+} finally {
+    if ($null -ne $gatewayProcess) {
+        if (-not $gatewayProcess.HasExited) { Stop-Process -Id $gatewayProcess.Id -Force }
+        $gatewayProcess.Dispose()
+    }
+    if ($null -ne $unrelatedProcess) {
+        if (-not $unrelatedProcess.HasExited) { Stop-Process -Id $unrelatedProcess.Id -Force }
+        $unrelatedProcess.Dispose()
+    }
+    Remove-Item -LiteralPath $processTestRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host 'Windows bootstrap parser, PlanOnly and DPAPI tests passed.'
