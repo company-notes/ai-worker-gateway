@@ -54,7 +54,7 @@ $clientId = $null
 $issuedToken = $null
 for ($i = 0; $i -lt $lines.Count; $i++) {
     $line = $lines[$i].Trim()
-    if ($line -match '^Created client ([a-zA-Z0-9_-]{8,100}) \("ai-worker-gateway", operate access to (.+)\)\. Its token') {
+    if ($line -match '^Created client ([a-zA-Z0-9_-]{8,100}) \("ai-worker-gateway", operate access to host ([a-z0-9][a-z0-9-]{0,31}) only\)\. Its token') {
         if ($null -ne $header) {
             throw 'Fleet CLI returned ambiguous credential output; no token was accepted.'
         }
