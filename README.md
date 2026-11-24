@@ -18,6 +18,16 @@ The installer checks 3773 and 3790, automatically mints a local-host-scoped inte
 
 **Not yet unattended before Windows sign-in**: the user-logon task is not an OS-level Windows service. It deliberately runs as the same user who owns the encrypted secrets and T3 session. The script does **not** yet install/configure a missing Fleet Gateway on a fresh Windows machine or automatically activate Skills inside an arbitrary third-party client. This is the remaining gap to the desired T3 + Node + clone + one-command fresh-machine experience. Local T3 Project registration is available only when provisioning is explicitly enabled with an authorized root, host and model policy.
 
+## 成果交付：使用者只看得到要看的東西
+
+完成的成果對一般使用者應呈現為：「行銷成效追蹤工具已經可以查看。已測試匯入 CSV、CTR／CVR／ROAS 計算與匯出。**查看成果資料夾**。需要修改直接告訴助理。」
+
+- **版本自動保存**：Gateway 透過 `WorkRequestPolicy` 為 `work_start`、`work_continue` 的 Worker 工作文字附加預設的「每個有意義、測過的完成階段安全 Git Commit」要求；助理不問使用者是否 Commit，也不自動 Merge 或 Push。它是對 Worker 的工作政策，仍需驗證 Git 實際提交。交付工具 `worker_delivery_link` 提供 `versionSaved`，只有工作分支相對 main 有新提交且工作目錄乾淨時才為 `true`。
+- **點擊開 Explorer**：完成後助理呼叫 `worker_delivery_link`，收到 `url` 後給使用者 **[查看成果資料夾]** 可點連結。連結限在**同一台 Windows 電腦**開啟；它是 24 小時內可使用一次的本機 capability，不能猜路徑、不能開其他專案。若專案不是由本 Gateway 受控建立，會明確拒絕，不偽造連結。點擊會在 Windows 端直接啟動 Explorer，不是要求使用者自己找深層路徑。
+- **工作狀態自動通知**：Windows 安裝版的 3791 在背景讀取自己派出工作的 `work_feed`，保存進度位置；這輪工作變成 `idle`、需要輸入或失敗時顯示 Windows 桌面提示（可能受作業系統勿擾模式影響）。`idle` 不是品質驗收成功。**通知進 OpenMausBot 聊天**則須由 Bot 真正建立並啟用一次性的背景 Routine；Session Router Skill 會要求 Bot 在首次派工時自動設定，若 Bot 沒有可用的 Routine 能力，不能假稱聊天會主動推播。詳見 [OpenMausBot 整合說明](docs/openmausbot-setup.md)。
+
+一般使用者不需要看到 Job ID、分支、Workspace、Commit ID 或上游 Token。技術識別碼只用於內部追蹤，必要時才展開。
+
 ## Quick start (dedicated test account, loopback only)
 
 1. Install Node.js 22.16+ and run the *original* upstream Fleet Gateway separately, following its official setup. This facade does not replace its OAuth/host enrollment.

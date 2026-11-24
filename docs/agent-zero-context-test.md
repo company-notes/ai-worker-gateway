@@ -32,6 +32,14 @@ Expected:
 - Agent starts one fresh job through the Gateway using `work_start` (or a safe exposed helper), with a new `requestId`, returns the real new Job ID and follows `work_status` / `work_messages`.
 - Check the delivered files or report, not just an `idle` state. Missing upstream model, policy, authorization or workspace is a **failure**, not something the assistant may invent.
 
+### Scenario A2 — 普通使用者的交付與自動通知
+
+在 Windows 同台電腦、OpenMausBot Bot 已啟用新版 Skill 的情況下：交辦工作後**停止聊天，不再主動問進度**；當工作進入 idle，預期 3791 背景 watcher 會顯示 Windows 提示。若 Bot 在首次派工時成功建立 OpenMausBot Routine，還應看到主聊天中的背景結果。這兩種通知要分別檢查，不得把「助理承諾通知」當成真正完成通知。
+
+助理的交付文字只應有工作名稱、功能摘要、品質檢查和 **查看成果資料夾** 連結，不能在主回覆要求使用者理解或操作 Job ID／worktree／branch／Commit。透過 `worker_delivery_link` 的 `versionSaved` 檢查 Worker 是否真的 Commit；若不是，繼續**同一 Job**請 Worker 保存版本，而不是詢問使用者。點擊 3791 本機 capability 連結，必須打開 Explorer 中驗證過的真實工作資料夾，而不是 Git 根目錄或其他無關目錄。點擊後再按一次會失效，連結隔日可能過期，可以重新取得。
+
+這些是 Windows 實機／OpenMausBot 的驗收項目；GitHub CI 的合成 T3 與隔離 Git worktree 測試，**不能取代**真正 OpenMausBot 背景 Routine 及 Explorer 桌面通知實測。
+
 ### Scenario B — continuation
 
 Then say:

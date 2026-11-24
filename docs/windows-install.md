@@ -40,6 +40,16 @@
 
 若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。
 
+## 工作完成後：Windows 提示、版本紀錄、點擊 Explorer
+
+新版 Windows 安裝器會讓 3791 在登入中的背景服務持續監控自己派出的工作；程式保存讀取游標，當原版 Fleet 報告這輪 `idle`（已停止但不等於驗收成功）、需輸入或執行失敗時發出 Windows 桌面提示。作業系統的勿擾模式可壓制顯示；登入前或 T3／3790／3791 沒運行時，不能承諾即時通知。
+
+新的 Session Router 在有 Git 的工作區會預設要求 Worker **每完成一段可驗證的工作就自行 Commit**，不問一般使用者，亦不擅自合併主分支。交付連結 `worker_delivery_link` 將 Git 提交狀態回報給助理，若尚未保存，助理應在同一工作中要求 Worker 補做，不讓使用者決定技術動作。
+
+助理核對交付物後可提供 **[查看成果資料夾]**，點擊 3791 的短效連結會打開這台 Windows 電腦的 Explorer。僅限 Gateway 管理的專案、真實工作分支與 Git worktree；其他電腦（包括手機）點擊 `127.0.0.1` 無法代替遠端檔案傳輸。
+
+若要**在 OpenMausBot 聊天裡**收到通知，還必須由 Bot 自己建立背景 Routine；Skill 會在首次派工時嘗試自動設定，不能單憑一段「我會通知你」的回覆算成功。詳見 [OpenMausBot 提醒驗收](openmausbot-setup.md)。
+
 ## OpenMausBot 的 Skill 啟用不可省略
 
 **注意：曾經發生過「助理只看到 Skill 檔案路徑，便轉去自己執行 mkdir 和寫 HTML」的真實失敗案例。** 單純發送 `SKILL.md` 路徑或讓 Bot 讀過文字，不等於 Skills 已啟用。OpenMausBot 必須在個別 Bot 的 Skills 明確匯入全文／打開開關，並在 Bot Tools → Access → MCP servers 啟用 `local-3791`。專職派工 Bot 也建議在固定角色 Instructions 設為「先 Gateway 後執行、不可本機代做」；Skill 本身不是強制政策。
