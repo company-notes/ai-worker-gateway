@@ -27,6 +27,7 @@ $sourceSkill = Join-Path $repoRoot '.agents\skills\session-router\SKILL.md'
 $settingsFile = Join-Path $stateRoot 'settings.json'
 $upstreamSecretFile = Join-Path $stateRoot 'upstream-token.dpapi'
 $clientSecretFile = Join-Path $stateRoot 'client-token.dpapi'
+$notificationSecretFile = Join-Path $stateRoot 'notification-storage-key.dpapi'
 $fleetRoot = Join-Path $env:LOCALAPPDATA 'T3FleetGateway'
 $fleetCliPath = Join-Path $fleetRoot 'app\bin\t3-fleet-gateway.js'
 $fleetConfigPath = Join-Path $fleetRoot 'config.json'
@@ -344,6 +345,14 @@ if ($ProvisionModelInstance -and $ProvisionModel) {
     $provisionModelSelection = $existing.provision_model_selection
 }
 
+# Private storage key persists across changes to the one externally visible MCP key.
+# This remains an internal DPAPI-protected secret; users never need to copy it.
+if (-not (Test-Path -LiteralPath $notificationSecretFile -PathType Leaf)) {
+    $newStorageKey = & $node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
+    $notificationSecure = ConvertTo-SecureString -String $newStorageKey -AsPlainText -Force
+    Save-Secret $notificationSecure $notificationSecretFile
+    $newStorageKey = $null
+}
 Save-Secret $upstreamSecret $upstreamSecretFile
 Save-Secret $clientSecret $clientSecretFile
 

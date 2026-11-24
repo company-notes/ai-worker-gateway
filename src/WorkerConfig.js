@@ -14,6 +14,7 @@ export class WorkerConfig {
         const provisionHost = environment.AWG_PROVISION_HOST ?? null;
         const selectionJSON = environment.AWG_PROVISION_MODEL_SELECTION ?? null;
         const notificationStateDirectory = environment.AWG_NOTIFICATION_STATE_DIR ?? null;
+        const notificationStorageKey = environment.AWG_NOTIFICATION_STORAGE_KEY ?? clientToken;
 
         if (listenHost !== '127.0.0.1' && listenHost !== '::1') {
             throw new Error('AWG_LISTEN_HOST must be loopback; public access is not supported');
@@ -51,6 +52,9 @@ export class WorkerConfig {
         }
 
         const provisionModelSelection = selectionJSON === null ? null : ModelSelectionPolicy.fromJSON(selectionJSON);
+        if (!notificationStorageKey || notificationStorageKey.length < 24) {
+            throw new Error('AWG_NOTIFICATION_STORAGE_KEY must be a private stable internal secret');
+        }
         if (notificationStateDirectory !== null && !path.isAbsolute(notificationStateDirectory)) {
             throw new Error('AWG_NOTIFICATION_STATE_DIR must be an absolute local directory');
         }
@@ -73,6 +77,7 @@ export class WorkerConfig {
             provisionHost,
             provisionModelSelection,
             notificationStateDirectory,
+            notificationStorageKey,
         });
     }
 

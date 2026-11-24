@@ -8,8 +8,9 @@ export class NotificationStore {
     constructor(config) {
         this.directory = config.notificationStateDirectory ?? null;
         this.masterToken = config.clientToken;
+        this.secret = config.notificationStorageKey ?? config.clientToken;
         this.file = this.directory ? path.join(this.directory, 'assistant-webhooks.enc.json') : null;
-        this.key = createHmac('sha256', this.masterToken).update('awg-webhook-store-v1').digest();
+        this.key = createHmac('sha256', this.secret).update('awg-webhook-store-v1').digest();
         this.data = {
             version, cursor: '0', profiles: {
                 default: { name: '預設助理', tokenHash: null, preference: 'unset', webhook: null, enabledAt: null },
@@ -23,7 +24,7 @@ export class NotificationStore {
     }
 
     _digest(token) {
-        return createHmac('sha256', this.masterToken).update('client:' + token).digest('hex');
+        return createHmac('sha256', this.secret).update('client:' + token).digest('hex');
     }
 
     identityFor(token) {
@@ -96,13 +97,13 @@ export class NotificationStore {
         }
     }
 
-    async _save() {
+    async _save(state) {
         if (!this.active) {
             throw new Error('Webhook notifications are not configured on this Gateway.');
         }
 
         const temporary = this.file + '.' + randomUUID() + '.tmp';
-        await fs.writeFile(temporary, this._seal(this.data), { flag: 'wx', mode: 0o600 });
+        await fs.writeFile(temporary, this._seal(state), { flag: 'wx', mode: 0o600 });
         try {
             await fs.rename(temporary, this.file);
         } finally {
@@ -112,8 +113,10 @@ export class NotificationStore {
 
     async change(updater) {
         const operation = this.writer.then(async () => {
-            const result = await updater(this.data);
-            await this._save();
+            const nextState = structuredClone(this.data);
+            const result = await updater(nextState);
+            await this._save(nextState);
+            this.data = nextState;
             return result;
         });
         this.writer = operation.catch(() => {});
