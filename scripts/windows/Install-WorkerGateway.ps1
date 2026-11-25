@@ -10,6 +10,8 @@ param(
     [string]$ProvisionHost,
     [string]$ProvisionModelInstance,
     [string]$ProvisionModel,
+    [switch]$UseT3DefaultModel,
+    [switch]$NoModelPrompt,
     [switch]$ForceSkillOverwrite,
     [switch]$RotateClientToken,
     [switch]$NoAutoStart,
@@ -33,6 +35,58 @@ $fleetCliPath = Join-Path $fleetRoot 'app\bin\t3-fleet-gateway.js'
 $fleetConfigPath = Join-Path $fleetRoot 'config.json'
 $fleetDataPath = Join-Path $fleetRoot 'data'
 $grantInstaller = Join-Path $PSScriptRoot 'New-ManagedFleetGrant.ps1'
+
+function Get-FleetModelCatalog([string]$hostId, [Security.SecureString]$secret, [string]$search = '') {
+    $clear = Get-ClearText $secret
+    try {
+        $arguments = @{ host = $hostId; refresh = $true }
+        if ($search) { $arguments.search = $search }
+        $payload = @{
+            jsonrpc = '2.0'
+            id = 38
+            method = 'tools/call'
+            params = @{ name = 'fleet_models'; arguments = $arguments }
+        } | ConvertTo-Json -Depth 10 -Compress
+        $headers = @{ Authorization = 'Bearer ' + $clear; Accept = 'application/json' }
+        $response = Invoke-RestMethod -Uri 'http://127.0.0.1:3790/mcp' -Method Post -Headers $headers -ContentType 'application/json' -Body $payload -TimeoutSec 15
+        if ($null -ne $response.PSObject.Properties['error'] -or
+            $null -eq $response.PSObject.Properties['result'] -or
+            $response.result.isError -eq $true) {
+            throw 'Fleet rejected model catalog access.'
+        }
+        $hosts = @($response.result.structuredContent.hosts | Where-Object { $_.host -eq $hostId -and $_.available -eq $true })
+        if ($hosts.Count -ne 1 -or $null -eq $hosts[0].models) {
+            throw 'Fleet did not advertise this host model catalog.'
+        }
+        return @($hosts[0].models)
+    } finally {
+        $clear = $null
+    }
+}
+
+function Test-FleetModelSelection($candidate, $catalog) {
+    $matches = @($catalog | Where-Object {
+        $_.providerInstanceId -ceq $candidate.instance_id -and $_.modelId -ceq $candidate.model
+    })
+    if ($matches.Count -ne 1) { return $false }
+    if ($null -ne $candidate.PSObject.Properties['options'] -and $candidate.options) {
+        foreach ($entry in $candidate.options.PSObject.Properties) {
+            $descriptors = @($matches[0].options | Where-Object { $_.id -ceq $entry.Name })
+            if ($descriptors.Count -ne 1) { return $false }
+            $descriptor = $descriptors[0]
+            if ($descriptor.type -eq 'boolean') {
+                if ($entry.Value -isnot [bool]) { return $false }
+            } elseif ($descriptor.type -eq 'select') {
+                if ($entry.Value -isnot [string] -or @(
+                    $descriptor.choices | Where-Object { $_.id -ceq $entry.Value }
+                ).Count -eq 0) { return $false }
+            } else {
+                return $false
+            }
+        }
+    }
+    return $true
+}
 
 function Test-LoopbackPort([int]$port) {
     $client = New-Object Net.Sockets.TcpClient
@@ -274,7 +328,84 @@ if ((Get-ClearText $clientSecret) -eq (Get-ClearText $upstreamSecret)) {
     throw 'The wrapper inbound token must differ from its upstream Fleet token.'
 }
 
-# Reinstallation safely stops ONLY this installer's owned scheduled task.
+# First installation inherits the exact model the operator already picked in T3 Desktop.
+# T3 persists the New threads default under ~/.t3/userdata/settings.json.
+# Existing installs preserve their own choice until -UseT3DefaultModel is explicitly requested.
+if ([bool]$ProvisionModelInstance -ne [bool]$ProvisionModel) {
+    throw 'ProvisionModelInstance and ProvisionModel must both be given, or neither.'
+}
+if ($UseT3DefaultModel -and $ProvisionModelInstance) {
+    throw 'Choose either UseT3DefaultModel or an explicit ProvisionModelInstance/ProvisionModel, not both.'
+}
+
+$provisionModelSelection = $null
+$defaultModelSelection = $null
+if ($null -ne $existing) {
+    if ($null -ne $existing.PSObject.Properties['provision_model_selection']) {
+        $provisionModelSelection = $existing.provision_model_selection
+    }
+    if ($null -ne $existing.PSObject.Properties['default_model_selection']) {
+        $defaultModelSelection = $existing.default_model_selection
+    }
+}
+
+if ($ProvisionModelInstance -and $ProvisionModel) {
+    $provisionModelSelection = @{
+        instance_id = $ProvisionModelInstance
+        model = $ProvisionModel
+    }
+    $defaultModelSelection = $provisionModelSelection
+} elseif ($null -eq $existing -or $UseT3DefaultModel) {
+    $modelReader = Join-Path $PSScriptRoot 'Read-T3DefaultModel.mjs'
+    $readOutput = & $node $modelReader
+    if ($LASTEXITCODE -ne 0 -or -not $readOutput) {
+        throw 'Unable to read T3 default model preferences safely.'
+    }
+    $t3Model = $readOutput | ConvertFrom-Json
+    if ($t3Model.status -eq 'found' -and $ProvisionHost) {
+        $candidate = [pscustomobject]@{
+            instance_id = [string]$t3Model.selection.instanceId
+            model = [string]$t3Model.selection.model
+            options = if ($null -ne $t3Model.selection.PSObject.Properties['options']) {
+                $t3Model.selection.options
+            } else { $null }
+        }
+        try {
+            $catalog = @(Get-FleetModelCatalog $ProvisionHost $upstreamSecret $candidate.model)
+            if (Test-FleetModelSelection $candidate $catalog) {
+                $defaultModelSelection = $candidate
+                if ($UseT3DefaultModel) {
+                    $provisionModelSelection = $null
+                }
+                Write-Host ('Default Worker model imported from T3 Desktop: ' +
+                    $candidate.instance_id + ' / ' + $candidate.model)
+            } else {
+                Write-Warning 'T3 default is not present in the authorized Fleet model catalog, or an option is unsupported. No automatic model was installed.'
+            }
+        } catch {
+            Write-Warning 'Could not validate the T3 model against the Fleet catalog. No automatic model was installed.'
+        }
+    } elseif ($t3Model.status -eq 'found') {
+        Write-Warning 'T3 has a default model, but no unique authorized Fleet Host is known. The Gateway cannot pin it safely.'
+    } elseif ($t3Model.status -eq 'invalid') {
+        Write-Warning 'T3 model settings are invalid; no model can be imported safely.'
+    } else {
+        Write-Host 'T3 Desktop does not have an explicit New threads model in its current userdata settings.'
+    }
+
+    if ($UseT3DefaultModel -and -not $defaultModelSelection) {
+        throw 'Cannot import a valid T3 default model. Choose it in T3 Desktop and ensure fleet_models advertises that model and its options.'
+    }
+
+    $canAsk = $null -eq $existing -and -not $defaultModelSelection -and
+        -not $NoModelPrompt -and -not $env:CI -and -not $env:GITHUB_ACTIONS
+    if ($canAsk) {
+        try { $canAsk = -not [Console]::IsInputRedirected } catch { $canAsk = $false }
+    }
+    if ($canAsk) {
+        Write-Host 'No model was imported. [A]sk the assistant to choose its own compatible model when needed (default), or [M]anually select from Fleet now.'
+        $choice = Read-Host 'Worker default model [A/M]'
+        if ($choice -match '^[mM]
 # Existing 3790/T3 services and other processes are left untouched.
 if (Test-LoopbackPort 3791) {
     if ($null -eq $existingTask) {
@@ -332,17 +463,193 @@ if ($provisionEnabled) {
     }
 }
 
-if ([bool]$ProvisionModelInstance -ne [bool]$ProvisionModel) {
-    throw 'ProvisionModelInstance and ProvisionModel must both be given, or neither.'
+# Private storage key persists across changes to the one externally visible MCP key.
+# This remains an internal DPAPI-protected secret; users never need to copy it.
+if (-not (Test-Path -LiteralPath $notificationSecretFile -PathType Leaf)) {
+    $newStorageKey = & $node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
+    $notificationSecure = ConvertTo-SecureString -String $newStorageKey -AsPlainText -Force
+    Save-Secret $notificationSecure $notificationSecretFile
+    $newStorageKey = $null
 }
-$provisionModelSelection = $null
-if ($ProvisionModelInstance -and $ProvisionModel) {
-    $provisionModelSelection = @{
-        instance_id = $ProvisionModelInstance
-        model = $ProvisionModel
+Save-Secret $upstreamSecret $upstreamSecretFile
+Save-Secret $clientSecret $clientSecretFile
+
+$settings = @{
+    repoRoot = $repoRoot
+    nodePath = $node
+    listenPort = 3791
+    listenHost = '127.0.0.1'
+    upstreamURL = 'http://127.0.0.1:3790/mcp'
+    generalProject = if ($GeneralProject) { $GeneralProject } else { $null }
+    workspaceRoot = if ($WorkspaceRoot) { [IO.Path]::GetFullPath($WorkspaceRoot) } else { $null }
+    provision_host = if ($provisionEnabled) { $ProvisionHost } else { $null }
+    managedFleetHost = if ($managedFleetGrant) { $grantHost } else { $null }
+    provision_model_selection = $provisionModelSelection
+    default_model_selection = $defaultModelSelection
+    managedFleetGrant = $managedFleetGrant
+    managedFleetClientId = $managedFleetClientId
+    clientTokenVersion = 2
+}
+$encoded = $settings | ConvertTo-Json -Depth 10
+[IO.File]::WriteAllText($settingsFile, $encoded, (New-Object Text.UTF8Encoding($false)))
+
+$exportFolder = Join-Path $stateRoot 'skills\session-router'
+New-Item -ItemType Directory -Force -Path $exportFolder | Out-Null
+Copy-Item -LiteralPath $sourceSkill -Destination (Join-Path $exportFolder 'SKILL.md') -Force
+if ($SkillInstallDirectory) {
+    New-Item -ItemType Directory -Force -Path $skillTargetFolder | Out-Null
+    if ((Test-Path -LiteralPath $skillTargetFile) -and $ForceSkillOverwrite) {
+        Copy-Item -LiteralPath $skillTargetFile -Destination ($skillTargetFile + '.backup-' + (Get-Date -Format 'yyyyMMddHHmmss'))
     }
-} elseif ($null -ne $existing -and $null -ne $existing.PSObject.Properties['provision_model_selection']) {
-    $provisionModelSelection = $existing.provision_model_selection
+    Copy-Item -LiteralPath $sourceSkill -Destination $skillTargetFile -Force
+}
+
+if (-not $NoAutoStart) {
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $powershellExe = Join-Path $PSHOME 'powershell.exe'
+    if (-not (Test-Path -LiteralPath $powershellExe)) {
+        $powershellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+    }
+    $action = New-ScheduledTaskAction -Execute $powershellExe -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $runner + '"')
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+    $taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -StartWhenAvailable
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+
+    $clientClear = Get-ClearText $clientSecret
+    try {
+        $healthy = $false
+        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3791/healthz' -Method Get -Headers @{ Authorization = 'Bearer ' + $clientClear } -TimeoutSec 2
+                if ($health.healthy -eq $true) {
+                    $healthy = $true
+                    break
+                }
+            } catch {
+                Start-Sleep -Milliseconds 500
+            }
+        }
+        if (-not $healthy) {
+            throw ('The Windows startup task registered, but authenticated health on 3791 did not succeed. Inspect ' + (Join-Path $stateRoot 'gateway.log'))
+        }
+    } finally {
+        $clientClear = $null
+    }
+}
+
+Write-Host 'AI Worker Gateway configuration installed without altering T3/Fleet source or data.'
+if ($RotateClientToken -or $rotateOnUpgrade) {
+    Write-Warning 'The one OpenMausBot MCP client key was rotated. Update local-3791 in OpenMausBot using Show-WorkerGatewayClientToken.ps1 -Clipboard.'
+}
+Write-Host 'Assistant MCP URL: http://127.0.0.1:3791/mcp'
+Write-Host ('Session Router Skill package: ' + (Join-Path $exportFolder 'SKILL.md'))
+if ($SkillInstallDirectory) {
+    Write-Host ('Session Router Skill copied to: ' + $skillTargetFile)
+} else {
+    Write-Host 'Import/enable this Skill in the assistant UI; a file copy alone does not activate it in an unknown client.'
+}
+Write-Host 'Copy your ONE OpenMausBot MCP client token securely with:'
+Write-Host ('  powershell -NoProfile -File "' + (Join-Path $PSScriptRoot 'Show-WorkerGatewayClientToken.ps1') + '" -Clipboard')
+if ($NoAutoStart) {
+    Write-Host ('Start manually with: powershell -NoProfile -File "' + $runner + '"')
+} else {
+    Write-Host 'Automatic startup: Task Scheduler at YOUR Windows user logon (not before sign-in).'
+}
+if ($provisionEnabled) {
+    Write-Host ('Worker-local T3 Project provisioning enabled for host: ' + $ProvisionHost)
+    Write-Host ('Approved isolated Workspace root: ' + $WorkspaceRoot)
+    if ($defaultModelSelection) {
+        Write-Host ('Worker default: ' + $defaultModelSelection.instance_id + ' / ' + $defaultModelSelection.model)
+    } elseif ($provisionModelSelection) {
+        Write-Host ('Provisioning model pin: ' + $provisionModelSelection.instance_id + ' / ' + $provisionModelSelection.model)
+    } else {
+        Write-Host 'Worker model: no fixed default; the assistant may use its own catalog-compatible model or ask the user.'
+    }
+    if ($managedFleetGrant) {
+        Write-Host 'Worker dispatch authorization: configured automatically for the selected local host.'
+    } else {
+        Write-Warning 'The manually supplied Fleet credential must permit Operate for newly registered projects.'
+    }
+} elseif (-not $GeneralProject) {
+    Write-Warning 'No general-purpose Fleet alias or Worker Provisioning enabled. New unrelated work will be blocked until the operator configures a destination.'
+}
+) {
+            if (-not $ProvisionHost) {
+                throw 'Manual model selection requires a uniquely identified local Fleet Host.'
+            }
+            $catalog = @(Get-FleetModelCatalog $ProvisionHost $upstreamSecret)
+            Write-Host 'Available model IDs (first 20; further models may require model search):'
+            $catalog | Select-Object -First 20 providerInstanceId, modelId | Format-Table | Out-Host
+            $instanceId = (Read-Host 'Exact providerInstanceId').Trim()
+            $modelId = (Read-Host 'Exact modelId').Trim()
+            $candidate = [pscustomobject]@{ instance_id = $instanceId; model = $modelId }
+            $catalog = @(Get-FleetModelCatalog $ProvisionHost $upstreamSecret $modelId)
+            if (-not (Test-FleetModelSelection $candidate $catalog)) {
+                throw 'The selected model is not in the authorized Fleet model catalog. Configure it in T3 Desktop or retry installation.'
+            }
+            $defaultModelSelection = $candidate
+        }
+    }
+}
+
+# Reinstallation safely stops ONLY this installer's owned scheduled task.
+# Existing 3790/T3 services and other processes are left untouched.
+if (Test-LoopbackPort 3791) {
+    if ($null -eq $existingTask) {
+        throw 'Port 3791 belongs to an unknown/manual process. Stop that process before the installer can safely restart its own task.'
+    }
+    Stop-ScheduledTask -TaskName $taskName
+    for ($attempt = 0; $attempt -lt 30 -and (Test-LoopbackPort 3791); $attempt++) {
+        Start-Sleep -Milliseconds 500
+    }
+    if (Test-LoopbackPort 3791) {
+        if ($null -eq $existing -or -not $existing.repoRoot -or -not $existing.nodePath) {
+            throw 'Cannot prove which Gateway process owns 3791 because its previous installation settings are missing.'
+        }
+
+        $stopScript = Join-Path $PSScriptRoot 'Stop-OwnedWorkerGateway.ps1'
+        $oldEntrypoint = Join-Path ([string]$existing.repoRoot) 'src\main.js'
+        & $stopScript -NodePath ([string]$existing.nodePath) -Entrypoint $oldEntrypoint -ListenPort 3791
+
+        for ($attempt = 0; $attempt -lt 20 -and (Test-LoopbackPort 3791); $attempt++) {
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-LoopbackPort 3791) {
+            throw 'Port 3791 is still occupied after stopping the verified Gateway process. Refusing to stop any other service.'
+        }
+    }
+}
+
+Assert-PrivateFolder $stateRoot
+
+$provisionEnabled = -not $NoProvisioning -and -not [string]::IsNullOrWhiteSpace($ProvisionHost)
+if ($provisionEnabled) {
+    if (-not $ProvisionHost) {
+        $candidates = @($fleetStatus.hosts | Where-Object {
+            $_.reachable -eq $true -and $_.discovery.enabled -eq $true -and $_.discovery.allowWorkStart -eq $true
+        })
+        if ($candidates.Count -ne 1) {
+            throw 'EnableProvisioning requires exactly one authorized, reachable host with Fleet discovery and work_start enabled, or an explicit -ProvisionHost.'
+        }
+        $ProvisionHost = [string]$candidates[0].id
+    }
+    $hostMatch = @($fleetStatus.hosts | Where-Object {
+        $_.id -eq $ProvisionHost -and $_.reachable -eq $true -and
+        $_.discovery.enabled -eq $true -and $_.discovery.allowWorkStart -eq $true
+    })
+    if ($hostMatch.Count -ne 1) {
+        throw 'ProvisionHost is not an authorized reachable Fleet host with discovery and work_start enabled.'
+    }
+
+    if (-not $WorkspaceRoot) {
+        $WorkspaceRoot = Join-Path $stateRoot 'workspaces'
+        Assert-PrivateFolder $WorkspaceRoot
+    }
+    if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) {
+        throw 'Provisioning WorkspaceRoot must be an existing directory.'
+    }
 }
 
 # Private storage key persists across changes to the one externally visible MCP key.
