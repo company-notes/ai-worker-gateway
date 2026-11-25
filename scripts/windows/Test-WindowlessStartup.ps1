@@ -6,7 +6,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Exercise the installer action itself with an isolated script in place of the Gateway.
-# The probe checks actual console attachment, not the visibility flag or window title.
+# The probe checks the actual console window handle, not a visibility flag.
+# CREATE_NO_WINDOW may still give a process an attachable headless console.
 $fixture = Join-Path $env:TEMP ('awg-windowless-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixture | Out-Null
 $process = $null
@@ -15,9 +16,9 @@ try {
     $launcherLog = Join-Path $fixture 'launcher.log'
     $powershellExe = Join-Path $PSHOME 'powershell.exe'
     $probe = @'
-Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class ConsoleProbe { [DllImport("kernel32.dll")] public static extern uint GetConsoleProcessList(uint[] processes, uint count); }'
-$count = [ConsoleProbe]::GetConsoleProcessList((New-Object 'uint32[]' 1), 1)
-[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'console-count.txt'), [string]$count)
+Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class ConsoleProbe { [DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); }'
+$windowHandle = [ConsoleProbe]::GetConsoleWindow().ToInt64()
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'console-window.txt'), [string]$windowHandle)
 Write-Output 'Windowless probe output'
 exit 17
 '@
@@ -49,14 +50,14 @@ exit 17
         throw 'The scheduled action did not propagate the probe exit.'
     }
 
-    $countFile = Join-Path $fixture 'console-count.txt'
-    if (-not (Test-Path -LiteralPath $countFile)) {
+    $windowFile = Join-Path $fixture 'console-window.txt'
+    if (-not (Test-Path -LiteralPath $windowFile)) {
         throw 'The scheduled action did not run the console probe.'
     }
 
-    $consoleCount = [int](Get-Content -LiteralPath $countFile -Raw)
-    if ($consoleCount -ne 0) {
-        throw "Regression: Gateway startup attached a console ($consoleCount processes); expected no console."
+    $windowHandle = [long](Get-Content -LiteralPath $windowFile -Raw)
+    if ($windowHandle -ne 0) {
+        throw "Regression: Gateway startup allocated a console window (handle $windowHandle); expected no window."
     }
     if ($process.ExitCode -ne 17) {
         throw 'The background launcher must preserve the child exit code for Task Scheduler restart.'
