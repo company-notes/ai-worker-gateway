@@ -10,7 +10,7 @@
 4. 在新助理 Skills UI 匯入、啟用 Skill；在 MCP 列表只設定 http://127.0.0.1:3791/mcp 與 3791 專用 Bearer Token。
 5. 全新助理不用舊聊天紀錄，以一般自然語言交辦；Skill 負責判斷 Job 續作／新工作、檢查相關 Workspace、呼叫 Gateway。
 
-這不是「Windows 尚未登入時」就執行的系統服務。T3 是使用者 Background Service，所以本地試行採用同使用者的登入觸發。3790 也必須有原本自己的自動啟動設定；本安裝器不改寫它。
+這不是「Windows 尚未登入時」就執行的系統服務。T3 是使用者 Background Service，所以本地試行採用同使用者的登入觸發。3791 採用 Windows GUI-subsystem launcher 與 `CreateNoWindow`，不建立 Console；原本由舊版安裝器建立的 3790 Startup 捷徑也會在核對捷徑與啟動腳本後遷移至同一種低權限排程。保留目前運行的 3790，新的啟動方式在下次 Windows 登入生效。其他安裝方式或自行修改的 Fleet 啟動器不會被改寫。
 
 ## 一次安裝
 
@@ -38,7 +38,7 @@
 
 **不再需要手動替 `omb-pilot-test` 升權。** 本機安裝器會建立自己的 Host 限定 Operate Grant，不更改原有 Pilot 測試 Client，也不改變其他 Bot 的授權。管理員應了解：持有 **3791 Client Token** 的本機助理，現在可執行此 Host 許可的工作；若不想讓某位 Bot 使用，請在那位 Bot 的 OpenMausBot MCP Access 關閉 `local-3791`。
 
-若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。
+若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。Gateway 的既有 `gateway.log` 會保留並追加；啟動器與 PowerShell 的診斷輸出另存 `launcher.log`（各 Gateway 自己的 LocalAppData 目錄）。背景啟動器使用 Windows 內建 .NET Framework C# 編譯器，無需另裝套件或管理員權限。
 
 ## 第一次安裝：自動沿用 T3 Desktop 的 New threads 預設
 

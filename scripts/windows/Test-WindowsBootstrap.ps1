@@ -14,7 +14,10 @@ $scripts = @(
     'Uninstall-WorkerGateway.ps1',
     'Register-T3Project.ps1',
     'New-ManagedFleetGrant.ps1',
-    'Stop-OwnedWorkerGateway.ps1'
+    'Stop-OwnedWorkerGateway.ps1',
+    'WindowlessStartup.ps1',
+    'Start-ManagedFleetGateway.ps1',
+    'Test-WindowlessStartup.ps1'
 )
 
 foreach ($file in $scripts) {

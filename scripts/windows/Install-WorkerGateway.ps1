@@ -35,6 +35,7 @@ $fleetCliPath = Join-Path $fleetRoot 'app\bin\t3-fleet-gateway.js'
 $fleetConfigPath = Join-Path $fleetRoot 'config.json'
 $fleetDataPath = Join-Path $fleetRoot 'data'
 $grantInstaller = Join-Path $PSScriptRoot 'New-ManagedFleetGrant.ps1'
+. (Join-Path $PSScriptRoot 'WindowlessStartup.ps1')
 
 function Get-FleetModelCatalog([string]$hostId, [Security.SecureString]$secret, [string]$search = '') {
     $clear = Get-ClearText $secret
@@ -424,8 +425,12 @@ if ($ProvisionModelInstance -and $ProvisionModel) {
     }
 }
 
+# Compile before stopping the existing 3791 service. A failed build must not interrupt it.
+Assert-PrivateFolder $stateRoot
+$launcher = Initialize-WindowlessLauncher -StateRoot $stateRoot
+
 # Reinstallation safely stops ONLY this installer's owned scheduled task.
-# Existing 3790/T3 services and other processes are left untouched.
+# Running 3790/T3 services and other processes are left untouched.
 if (Test-LoopbackPort 3791) {
     if ($null -eq $existingTask) {
         throw 'Port 3791 belongs to an unknown/manual process. Stop that process before the installer can safely restart its own task.'
@@ -451,8 +456,6 @@ if (Test-LoopbackPort 3791) {
         }
     }
 }
-
-Assert-PrivateFolder $stateRoot
 
 $provisionEnabled = -not $NoProvisioning -and -not [string]::IsNullOrWhiteSpace($ProvisionHost)
 if ($provisionEnabled) {
@@ -504,6 +507,7 @@ $settings = @{
     provision_host = if ($provisionEnabled) { $ProvisionHost } else { $null }
     managedFleetHost = if ($managedFleetGrant) { $grantHost } else { $null }
     provision_model_selection = $provisionModelSelection
+    default_model_selection = $defaultModelSelection
     managedFleetGrant = $managedFleetGrant
     managedFleetClientId = $managedFleetClientId
     clientTokenVersion = 2
@@ -523,16 +527,9 @@ if ($SkillInstallDirectory) {
 }
 
 if (-not $NoAutoStart) {
-    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $powershellExe = Join-Path $PSHOME 'powershell.exe'
-    if (-not (Test-Path -LiteralPath $powershellExe)) {
-        $powershellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
-    }
-    $action = New-ScheduledTaskAction -Execute $powershellExe -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $runner + '"')
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
-    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-    $taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -StartWhenAvailable
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -Force | Out-Null
+    $launcherLog = Join-Path $stateRoot 'launcher.log'
+    $action = New-WindowlessTaskAction -LauncherPath $launcher -RunnerPath $runner -LogPath $launcherLog
+    Register-WindowlessGatewayTask -TaskName $taskName -Action $action
     Start-ScheduledTask -TaskName $taskName
 
     $clientClear = Get-ClearText $clientSecret
@@ -555,6 +552,9 @@ if (-not $NoAutoStart) {
     } finally {
         $clientClear = $null
     }
+
+    $startupFolder = [Environment]::GetFolderPath('Startup')
+    Move-LegacyFleetStartup -FleetRoot $fleetRoot -StartupFolder $startupFolder -NodePath $node -LauncherPath $launcher
 }
 
 Write-Host 'AI Worker Gateway configuration installed without altering T3/Fleet source or data.'
@@ -573,7 +573,7 @@ Write-Host ('  powershell -NoProfile -File "' + (Join-Path $PSScriptRoot 'Show-W
 if ($NoAutoStart) {
     Write-Host ('Start manually with: powershell -NoProfile -File "' + $runner + '"')
 } else {
-    Write-Host 'Automatic startup: Task Scheduler at YOUR Windows user logon (not before sign-in).'
+    Write-Host 'Automatic startup: windowless Task Scheduler action at YOUR Windows user logon (not before sign-in).'
 }
 if ($provisionEnabled) {
     Write-Host ('Worker-local T3 Project provisioning enabled for host: ' + $ProvisionHost)

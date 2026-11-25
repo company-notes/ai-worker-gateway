@@ -72,11 +72,16 @@ if ($null -ne $settings.PSObject.Properties['default_model_selection'] -and $set
     $env:AWG_DEFAULT_MODEL_SELECTION = $selection | ConvertTo-Json -Depth 10 -Compress
 }
 
+$launcher = $env:AWG_WINDOWLESS_LAUNCHER
+if (-not $launcher) {
+    . (Join-Path $PSScriptRoot 'WindowlessStartup.ps1')
+    $launcher = Initialize-WindowlessLauncher -StateRoot $stateRoot
+}
+
+[Reflection.Assembly]::LoadFrom($launcher) | Out-Null
 $logFile = Join-Path $stateRoot 'gateway.log'
-Push-Location -LiteralPath $settings.repoRoot
-try {
-    & $settings.nodePath $entrypoint *> $logFile
-    if ($LASTEXITCODE -ne 0) { throw ('Worker Gateway process exited with status ' + $LASTEXITCODE) }
-} finally {
-    Pop-Location
+$arguments = '"' + $entrypoint + '"'
+$exitCode = [AIWorkerGateway.Windows.WindowlessProcess]::run([string]$settings.nodePath, $arguments, [string]$settings.repoRoot, $logFile)
+if ($exitCode -ne 0) {
+    throw ('Worker Gateway process exited with status ' + $exitCode)
 }

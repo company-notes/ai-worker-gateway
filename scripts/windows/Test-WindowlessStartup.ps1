@@ -23,11 +23,8 @@ exit 17
 '@
     [IO.File]::WriteAllText($runner, $probe, (New-Object Text.UTF8Encoding($false)))
 
-    $module = Join-Path $PSScriptRoot 'WindowlessStartup.ps1'
-    if (Test-Path -LiteralPath $module) {
-        . $module
-        $launcher = Initialize-WindowlessLauncher -StateRoot $fixture
-    }
+    . (Join-Path $PSScriptRoot 'WindowlessStartup.ps1')
+    $launcher = Initialize-WindowlessLauncher -StateRoot $fixture
 
     $tokens = $null
     $errors = $null
