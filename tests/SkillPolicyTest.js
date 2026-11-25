@@ -13,7 +13,9 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     assert.match(header[1], /description:.*行銷分析.*AI Worker Gateway MCP/);
     assert.match(source, /先使用 Gateway MCP 的唯讀工具核對現有 Job 與 Workspace/);
     assert.match(source, /優先先不傳 `modelSelection`/);
-    assert.match(source, /不得自行把 `modelSelection` 放進 `work_start`/);
+    assert.match(source, /不得自行挑選另一個 `modelSelection`/);
+    assert.match(source, /沿用助理本身的模型/);
+    assert.match(source, /source=explicit/);
     assert.match(source, /Fleet Host／Project 預設時，應省略模型參數/);
     assert.match(source, /否則先詢問使用者要選哪個/);
     assert.match(source, /不要先呼叫本機.*mkdir/);
