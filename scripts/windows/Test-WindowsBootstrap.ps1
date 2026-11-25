@@ -159,4 +159,6 @@ try {
     Remove-Item -LiteralPath $processTestRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+& (Join-Path $PSScriptRoot 'Test-WindowlessStartup.ps1')
+
 Write-Host 'Windows bootstrap parser, PlanOnly and DPAPI tests passed.'
