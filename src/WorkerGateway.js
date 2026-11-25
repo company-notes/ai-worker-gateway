@@ -10,7 +10,10 @@ import { JobNotificationService } from './JobNotificationService.js';
 export class WorkerGateway {
     constructor(config, services = {}) {
         this.config = config;
-        this.upstream = new UpstreamMCPClient(config.upstreamURL, config.upstreamToken);
+        this.upstream = new UpstreamMCPClient(config.upstreamURL, config.upstreamToken, {
+            defaultModelSelection: config.defaultModelSelection,
+            defaultHost: config.provisionHost,
+        });
         this.workspaces = new WorkspaceService(config.workspaceRoot);
         this.taskDispatch = new TaskDispatchService(this.upstream, config.generalProject);
         this.provision = new WorkspaceProvisionService(config, this.workspaces, this.upstream, services.projectAdapter);

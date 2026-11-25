@@ -207,7 +207,8 @@ export class WorkspaceProvisionService {
 
     async _ensure(args) {
         await this._assertHostAuthorized();
-        const modelSelection = this.config.provisionModelSelection ?? args.modelSelection ?? null;
+        const modelSelection = this.config.provisionModelSelection ?? args.modelSelection ??
+            this.config.defaultModelSelection ?? null;
         await this._verifyModelSelection(modelSelection);
 
         const workspacePath = await this.workspaces.pathFor(args.name);

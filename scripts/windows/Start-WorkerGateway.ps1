@@ -43,6 +43,7 @@ Remove-Item Env:AWG_WORKSPACE_ROOT -ErrorAction SilentlyContinue
 Remove-Item Env:AWG_GENERAL_PROJECT -ErrorAction SilentlyContinue
 Remove-Item Env:AWG_PROVISION_HOST -ErrorAction SilentlyContinue
 Remove-Item Env:AWG_PROVISION_MODEL_SELECTION -ErrorAction SilentlyContinue
+Remove-Item Env:AWG_DEFAULT_MODEL_SELECTION -ErrorAction SilentlyContinue
 if ($settings.workspaceRoot) { $env:AWG_WORKSPACE_ROOT = [string]$settings.workspaceRoot }
 if ($settings.generalProject) { $env:AWG_GENERAL_PROJECT = [string]$settings.generalProject }
 if ($null -ne $settings.PSObject.Properties['provision_host'] -and $settings.provision_host) {
@@ -54,7 +55,21 @@ if ($null -ne $settings.PSObject.Properties['provision_model_selection'] -and $s
         instanceId = [string]$model.instance_id
         model = [string]$model.model
     }
+    if ($null -ne $model.PSObject.Properties['options'] -and $model.options) {
+        $selection.options = $model.options
+    }
     $env:AWG_PROVISION_MODEL_SELECTION = $selection | ConvertTo-Json -Depth 10 -Compress
+}
+if ($null -ne $settings.PSObject.Properties['default_model_selection'] -and $settings.default_model_selection) {
+    $model = $settings.default_model_selection
+    $selection = @{
+        instanceId = [string]$model.instance_id
+        model = [string]$model.model
+    }
+    if ($null -ne $model.PSObject.Properties['options'] -and $model.options) {
+        $selection.options = $model.options
+    }
+    $env:AWG_DEFAULT_MODEL_SELECTION = $selection | ConvertTo-Json -Depth 10 -Compress
 }
 
 $logFile = Join-Path $stateRoot 'gateway.log'

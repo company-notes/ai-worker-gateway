@@ -2,9 +2,33 @@ import { randomUUID } from 'node:crypto';
 import { WorkRequestPolicy } from './WorkRequestPolicy.js';
 
 export class UpstreamMCPClient {
-    constructor(upstreamURL, token) {
+    constructor(upstreamURL, token, options = {}) {
         this.upstreamURL = upstreamURL;
         this.token = token;
+        this.defaultModelSelection = options.defaultModelSelection ?? null;
+        this.defaultHost = options.defaultHost ?? null;
+    }
+
+    _applyDefaultModel(payload) {
+        if (payload.method !== 'tools/call' || payload.params?.name !== 'work_start' ||
+            !this.defaultModelSelection || !this.defaultHost) {
+            return payload;
+        }
+
+        const args = payload.params.arguments;
+        if (!args || typeof args !== 'object' || Array.isArray(args) ||
+            Object.prototype.hasOwnProperty.call(args, 'modelSelection') ||
+            args.project !== undefined || args.target?.host !== this.defaultHost) {
+            return payload;
+        }
+
+        return {
+            ...payload,
+            params: {
+                ...payload.params,
+                arguments: { ...args, modelSelection: this.defaultModelSelection },
+            },
+        };
     }
 
     async callTool(name, args) {
@@ -47,7 +71,7 @@ export class UpstreamMCPClient {
         const response = await fetch(this.upstreamURL, {
             method: 'POST',
             headers,
-            body: JSON.stringify(WorkRequestPolicy.apply(payload)),
+            body: JSON.stringify(WorkRequestPolicy.apply(this._applyDefaultModel(payload))),
             signal: AbortSignal.timeout(120_000),
         });
         const body = await response.text();

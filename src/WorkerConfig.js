@@ -13,6 +13,7 @@ export class WorkerConfig {
         const generalProject = environment.AWG_GENERAL_PROJECT ?? null;
         const provisionHost = environment.AWG_PROVISION_HOST ?? null;
         const selectionJSON = environment.AWG_PROVISION_MODEL_SELECTION ?? null;
+        const defaultSelectionJSON = environment.AWG_DEFAULT_MODEL_SELECTION ?? null;
         const notificationStateDirectory = environment.AWG_NOTIFICATION_STATE_DIR ?? null;
         const notificationStorageKey = environment.AWG_NOTIFICATION_STORAGE_KEY ?? clientToken;
 
@@ -52,6 +53,7 @@ export class WorkerConfig {
         }
 
         const provisionModelSelection = selectionJSON === null ? null : ModelSelectionPolicy.fromJSON(selectionJSON);
+        const defaultModelSelection = defaultSelectionJSON === null ? null : ModelSelectionPolicy.fromJSON(defaultSelectionJSON);
         if (!notificationStorageKey || notificationStorageKey.length < 24) {
             throw new Error('AWG_NOTIFICATION_STORAGE_KEY must be a private stable internal secret');
         }
@@ -76,6 +78,7 @@ export class WorkerConfig {
             generalProject,
             provisionHost,
             provisionModelSelection,
+            defaultModelSelection,
             notificationStateDirectory,
             notificationStorageKey,
         });
