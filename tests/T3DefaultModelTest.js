@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import test from 'node:test';
 import { inspectT3Default, normalizeT3ModelSelection } from '../src/T3DefaultModel.js';
@@ -57,7 +58,7 @@ test('installer reads only the T3 settings field from the real userdata layout, 
             },
             secretProviders: { privateToken: 'DONT-DISCLOSE-THIS' },
         }));
-        const parsed = JSON.parse(execFileSync(process.execPath, [script.pathname], {
+        const parsed = JSON.parse(execFileSync(process.execPath, [fileURLToPath(script)], {
             env: { ...process.env, T3CODE_HOME: home },
             encoding: 'utf8',
         }));
