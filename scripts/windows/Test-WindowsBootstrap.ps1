@@ -14,7 +14,11 @@ $scripts = @(
     'Uninstall-WorkerGateway.ps1',
     'Register-T3Project.ps1',
     'New-ManagedFleetGrant.ps1',
-    'Stop-OwnedWorkerGateway.ps1'
+    'Stop-OwnedWorkerGateway.ps1',
+    'WindowlessStartup.ps1',
+    'Start-ManagedFleetGateway.ps1',
+    'Test-WindowlessStartup.ps1',
+    'Test-FleetStartupMigration.ps1'
 )
 
 foreach ($file in $scripts) {
@@ -158,5 +162,8 @@ try {
     }
     Remove-Item -LiteralPath $processTestRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+& (Join-Path $PSScriptRoot 'Test-WindowlessStartup.ps1')
+& (Join-Path $PSScriptRoot 'Test-FleetStartupMigration.ps1')
 
 Write-Host 'Windows bootstrap parser, PlanOnly and DPAPI tests passed.'
