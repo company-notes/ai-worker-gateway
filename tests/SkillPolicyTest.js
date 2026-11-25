@@ -36,6 +36,14 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     assert.match(source, /不以 Job ID、Host、Workspace/);
 });
 
+test('Windows installer documentation uses the actual Fleet config location and explains explicit model precedence', async () => {
+    const guide = await readFile(new URL('../docs/windows-install.md', import.meta.url), 'utf8');
+    assert.match(guide, /T3FleetGateway.*config\\.json/);
+    assert.match(guide, /provision_model_selection/);
+    assert.match(guide, /source=explicit/);
+    assert.match(guide, /Fleet Host.*defaultModelSelection/);
+});
+
 test('OpenMausBot installation acceptance distinguishes a file path from an enabled skill and checks MCP first', async () => {
     const guide = await readFile(guideURL, 'utf8');
     assert.match(guide, /Bot Settings → Skills/);

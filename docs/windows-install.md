@@ -40,6 +40,16 @@
 
 若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。
 
+## 指定 Fleet／Worker 的預設模型
+
+這套 Windows 安裝器實際核對的**原版 Fleet 設定檔**是 `%LOCALAPPDATA%\\T3FleetGateway\\config.json`；不要誤用跨平台文件通用的 `~/.config/t3-fleet-gateway/config.json`。若 3790 以 `T3FG_CONFIG` 或 `--config` 啟動，實際生效的檔案可能另有指定，應先確認服務啟動參數。
+
+先從唯一 3791 MCP 的 `fleet_models` 確認想使用模型的真正 `providerInstanceId`、`modelId` 與合法 `options`。不要以 T3 UI 顯示名稱（例如「Terra」）猜模型 ID。原版 Fleet 的模型規則是：**這次 `work_start.modelSelection` 的 explicit 選擇 > Fleet 專案 `modelSelection` > Fleet Host `defaultModelSelection` > T3 專案預設**。若 `work_status.model.source=explicit`，就代表派工時送出了明確的模型選擇，不能只改 Host 預設就期待覆蓋它。
+
+普通管理方式是在原版 Fleet config `hosts[]` 的**正確本機 Host**設定 `defaultModelSelection: { "instanceId": "<fleet_models providerInstanceId>", "model": "<fleet_models modelId>" }`（可加實際宣告的 `options`）；保留其他設定並備份，再依原有啟動方式**重啟原版 3790 Fleet**。若 `projects[]` 已對特定專案設定 `modelSelection`，它仍會覆蓋 Host 預設。
+
+另外 3791 安裝器的 `-ProvisionModelInstance`／`-ProvisionModel` 是**受管 Workspace Provisioning 的鎖定模型**，保存在 `%LOCALAPPDATA%\\AIWorkerGateway\\settings.json` 的 `provision_model_selection`；它**不是所有派工的全域預設值**。若此欄不為 null，`worker_workspace_ensure` 會將鎖定模型回傳供 `work_start` 明確派工，故可以形成 `source=explicit`，優先於 Fleet Host 預設。更新安裝器參數可調整其值。Session Router Skill 現已修正為：無使用者指定／管理員固定模型時，應優先省略 `modelSelection`，尊重已設定的 Fleet／T3 預設，而不是自行挑 Sonnet 或 High。
+
 ## 工作完成後：助理自選 Webhook、版本紀錄、直接開 Explorer
 
 **Gateway 不再發 Windows 桌面通知。** 第一次派工時，Session Router 會先查詢這位助理的通知偏好，尚未設定才詢問「完成工作時要不要主動通知？」。使用者說不要則儲存拒絕偏好，不會自動推播；往後仍可直接問助理進度。
