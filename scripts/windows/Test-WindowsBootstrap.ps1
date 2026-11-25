@@ -17,7 +17,8 @@ $scripts = @(
     'Stop-OwnedWorkerGateway.ps1',
     'WindowlessStartup.ps1',
     'Start-ManagedFleetGateway.ps1',
-    'Test-WindowlessStartup.ps1'
+    'Test-WindowlessStartup.ps1',
+    'Test-FleetStartupMigration.ps1'
 )
 
 foreach ($file in $scripts) {
@@ -163,5 +164,6 @@ try {
 }
 
 & (Join-Path $PSScriptRoot 'Test-WindowlessStartup.ps1')
+& (Join-Path $PSScriptRoot 'Test-FleetStartupMigration.ps1')
 
 Write-Host 'Windows bootstrap parser, PlanOnly and DPAPI tests passed.'
