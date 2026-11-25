@@ -35,6 +35,7 @@ $fleetCliPath = Join-Path $fleetRoot 'app\bin\t3-fleet-gateway.js'
 $fleetConfigPath = Join-Path $fleetRoot 'config.json'
 $fleetDataPath = Join-Path $fleetRoot 'data'
 $grantInstaller = Join-Path $PSScriptRoot 'New-ManagedFleetGrant.ps1'
+
 . (Join-Path $PSScriptRoot 'WindowlessStartup.ps1')
 
 function Get-FleetModelCatalog([string]$hostId, [Security.SecureString]$secret, [string]$search = '') {

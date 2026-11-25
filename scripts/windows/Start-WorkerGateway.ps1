@@ -81,6 +81,7 @@ if (-not $launcher) {
 [Reflection.Assembly]::LoadFrom($launcher) | Out-Null
 $logFile = Join-Path $stateRoot 'gateway.log'
 $arguments = '"' + $entrypoint + '"'
+
 $exitCode = [AIWorkerGateway.Windows.WindowlessProcess]::run([string]$settings.nodePath, $arguments, [string]$settings.repoRoot, $logFile)
 if ($exitCode -ne 0) {
     throw ('Worker Gateway process exited with status ' + $exitCode)

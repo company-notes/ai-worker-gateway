@@ -19,5 +19,6 @@ if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf) -or
 
 [Reflection.Assembly]::LoadFrom($env:AWG_WINDOWLESS_LAUNCHER) | Out-Null
 $arguments = '"' + $entrypoint + '" serve'
+
 $exitCode = [AIWorkerGateway.Windows.WindowlessProcess]::run($NodePath, $arguments, $app, (Join-Path $PSScriptRoot 'gateway.log'))
 exit $exitCode

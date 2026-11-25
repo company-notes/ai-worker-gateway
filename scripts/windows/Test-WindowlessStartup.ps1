@@ -56,9 +56,11 @@ exit 17
     if ($windowHandle -ne 0) {
         throw "Regression: Gateway startup allocated a console window (handle $windowHandle); expected no window."
     }
+
     if ($process.ExitCode -ne 17) {
         throw 'The background launcher must preserve the child exit code for Task Scheduler restart.'
     }
+
     if (-not (Select-String -LiteralPath $launcherLog -Pattern 'Windowless probe output' -Quiet)) {
         throw 'Background startup must preserve child output in a diagnostic log.'
     }

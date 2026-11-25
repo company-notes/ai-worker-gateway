@@ -40,6 +40,7 @@ function New-WindowlessTaskAction([string]$LauncherPath, [string]$RunnerPath, [s
         if ($_ -match '["\r\n]' -or $_.EndsWith('\')) {
             throw 'Invalid argument for the Windows Gateway startup action.'
         }
+
         '"' + $_ + '"'
     })
 
@@ -68,6 +69,7 @@ function Move-LegacyFleetStartup([string]$FleetRoot, [string]$StartupFolder, [st
     $log = Join-Path $FleetRoot 'gateway.log'
     $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $legacyArguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $legacyRunner + '"'
+
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     if ($shortcut.TargetPath -ne $powershellExe -or $shortcut.Arguments -cne $legacyArguments -or $shortcut.WorkingDirectory -ne $app) {

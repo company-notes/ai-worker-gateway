@@ -91,6 +91,7 @@ const timer = setInterval(() => {
     if ((Test-Path -LiteralPath $shortcutPath) -or @($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ne $launcher) {
         throw 'The known legacy shortcut must be replaced by exactly one windowless scheduled action.'
     }
+
     if ([IO.File]::ReadAllText($config) -cne $configContent -or [IO.File]::ReadAllText($legacyRunner) -cne $legacyScript) {
         throw 'Startup migration must preserve the original Fleet config and runner.'
     }
