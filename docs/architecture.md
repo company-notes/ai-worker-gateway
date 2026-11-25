@@ -32,3 +32,5 @@ git commit -m "chore: update upstream t3-fleet-gateway pin"
 ```
 
 CI must pass against the new pin before deployment. An upstream pull is **not** a guaranteed compatibility upgrade; changed tool schemas, OAuth or transports may require changes in our adapter. Git submodule checkout does not install or start the upstream service.
+
+- **Default model policy**：Windows 首次安裝使用唯讀 Node helper 從 T3 Desktop `userdata/settings.json` 提取 `defaultModelSelection`，將選項陣列轉成選項字典並通過 `fleet_models` 實際型別與選項檢查，寫入受 ACL 保護的 Gateway `default_model_selection`，而不修改原版 T3/Fleet。`WorkerConfig` 導入 `AWG_DEFAULT_MODEL_SELECTION`；`UpstreamMCPClient` 只在本機受管 T3 Target 新工作未指定模型時加入選擇，單次明確模型或 Fleet Alias 預設優先。`WorkspaceProvisionService` 在沒有管理員 Provisioning 專用 pin、沒有使用者 modelSelection 時使用這個預設，並驗證後傳回。注意在原版 Fleet `work_status` 顯示 `source=explicit`，因為模型在 Gateway 層加入。安裝器 `-UseT3DefaultModel` 可顯式重新匯入並清除舊 Provisioning pin；普通重裝保留先前選擇。

@@ -6,6 +6,12 @@ An independent, **local-only experimental MCP facade** that extends the original
 
 **Not yet supported:** unattended deployment of the original Fleet Gateway on fresh machines, backend-independent project provisioning beyond the local T3 CLI adapter, dynamic semantic project selection across workers, remote OAuth, multi-user tenant isolation, and live Windows/T3 acceptance **of this new provisioning path**. `worker_workspace_prepare` deliberately reports `dispatchReady: false` and requires operator registration. Do not confuse a prepared directory with a new company project or a registered T3 Project.
 
+## Worker model defaults: inherit T3 Desktop on first installation
+
+T3 Desktop keeps its **New threads** default in its local `~/.t3/userdata/settings.json` (`T3CODE_HOME` can relocate it). When the Windows installer runs for the **first** time, it reads only `defaultModelSelection`, including selected reasoning/effort options, and verifies the provider/model/options against the authorized Fleet `fleet_models` catalog. It saves the result as the **Gateway default** without modifying T3 or Fleet. On managed local T3 targets, the Gateway supplies this model only when the user/assistant has not explicitly selected another; an explicit per-job choice wins. Fleet configured project aliases continue to use their own defaults. The original Fleet records the Gateway-supplied selection as `source=explicit` because it receives a concrete model, even though the assistant did not choose one arbitrarily.
+
+If T3 has no explicit default or the catalog cannot verify it, the first interactive installer offers a choice: allow an agent to reuse **its own exact Fleet-compatible model** (or ask when no such match exists), or manually pick a verified model from Fleet. Noninteractive installation never blocks on a prompt. Reinstalling does not silently reset the chosen model. To synchronize a changed T3 Desktop preference on an existing installation, rerun the installer with `-UseT3DefaultModel`; this explicitly replaces the old provisioning model pin. Normal `-ProvisionModelInstance`/`-ProvisionModel` flags still let an operator choose an exact model intentionally.
+
 ## Windows user-logon bootstrap (existing T3 and Fleet installed)
 
 From the cloned Repository, **stop any manually running 3791 process first**, then run in Windows PowerShell 5.1+:

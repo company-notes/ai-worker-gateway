@@ -40,6 +40,23 @@
 
 若 3791 是由本安裝器的排程啟動，重跑安裝器會在完成安全檢查後**自行停止並重啟排程及先前遺留的 Node 子程序**。自動停止必須先核對 3791 的監聽 PID、Node 執行檔、原有安裝目錄的 `src/main.js`、Windows 使用者 SID 與程序啟動時間，才可終止；只要對不上就拒絕操作。**不會停止原版 3790／3773 或未知程序**，也不需要使用者手動尋找或強制結束 PID。
 
+## 第一次安裝：自動沿用 T3 Desktop 的 New threads 預設
+
+一般使用者先開啟 T3 Desktop，在 **Settings → New threads** 選好想用的 Provider／模型／推理強度，再執行正常的 `Install-WorkerGateway.ps1`。新安裝器會**唯讀**檢查預設 T3 使用者資料夾 `%USERPROFILE%\.t3\userdata\settings.json`；若已設定 `T3CODE_HOME`，改從該位置的 `userdata\settings.json` 讀取。它只讀 `defaultModelSelection`，轉換 T3 的 `options: [{id,value}]` 成 Fleet 的選項物件，並用當前授權 Host 的 `fleet_models` 驗證，成功後複製到 `%LOCALAPPDATA%\AIWorkerGateway\settings.json` 的 `default_model_selection`。**不寫入、不改動 T3 的設定檔／原版 Fleet 的設定檔或資料庫**。
+
+往後派給受管理的本機 T3 專案（`work_start` 帶 `target: {host: ...}`）時，若沒有使用者選擇的 `modelSelection`，3791 會自動套用這個模型。使用者明確指定模型仍優先。**已設定別名的 Fleet Project** 繼續使用它自己的專案／Host 預設，不會因匯入而被強行覆寫。原版 Fleet 在 T3 新專案工作中記錄 `source=explicit` 是因 Gateway 實際送出預設模型，而不是助理自己偷偷選了 Sonnet。
+
+找不到 T3 預設、沒有授權模型或選項不相容時，**不猜測、不默默改成 Sonnet**。第一次**互動式**安裝會問要「以後由助理沿用其已知、Fleet 也支援的自身模型或詢問使用者」或「現在手動選擇已驗證的 Fleet 模型」。非互動式安裝使用 `-NoModelPrompt` 或 CI 環境時不詢問，保持未設定；後續沒有模型時讓助理確認，避免流程卡死。注意助理的聊天模型不見得已接入 T3，必須在 `fleet_models` 中有相同 Provider／Model ID 才能使用。
+
+**現有使用者**：普通重裝會保留 3791 原來的模型選擇；若要重新沿用現在 T3 Desktop 的預設，請先確認 T3 中已選妥，再執行：
+
+```powershell
+git pull --ff-only
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Install-WorkerGateway.ps1 -UseT3DefaultModel
+```
+
+`-UseT3DefaultModel` 會清掉既有的 Provisioning 模型 pin，避免舊的 Sonnet 覆蓋新匯入的 Terra。如果 T3 目前沒有可讀取／可用的預設，匯入會在更動 3791 設定前拒絕。要確認複製後的值，只讀取 `%LOCALAPPDATA%\AIWorkerGateway\settings.json` 的 `default_model_selection`、`provision_model_selection` 欄位，**不要把完整設定檔貼到聊天**。
+
 ## 指定 Fleet／Worker 的預設模型
 
 這套 Windows 安裝器實際核對的**原版 Fleet 設定檔**是 `%LOCALAPPDATA%\\T3FleetGateway\\config.json`；不要誤用跨平台文件通用的 `~/.config/t3-fleet-gateway/config.json`。若 3790 以 `T3FG_CONFIG` 或 `--config` 啟動，實際生效的檔案可能另有指定，應先確認服務啟動參數。
