@@ -35,7 +35,7 @@ export function normalizeT3ModelSelection(input) {
             options = input.options;
         }
 
-        selection.options = options;
+        selection.options = { ...options };
     }
 
     return ModelSelectionPolicy.validate(selection);
