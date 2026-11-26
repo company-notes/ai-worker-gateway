@@ -129,17 +129,17 @@ export class WorkerGateway {
                     ? this._routeFromArguments(args)
                     : { notificationRouteId: undefined, cleaned: args };
                 const result = await this.taskDispatch.run(name, route.cleaned);
-                if (name === 'worker_task_start' && route.notificationRouteId) {
-                    await this.notifications.trackJob(route.notificationRouteId, result);
-                }
-                return this._extensionResult(payload.id, result);
+                const recorded = name === 'worker_task_start'
+                    ? await this.notifications.recordDispatch(route.notificationRouteId, result) : result;
+
+                return this._extensionResult(payload.id, recorded);
             }
             if (['worker_notification_status', 'worker_notification_setup',
                 'worker_notification_pairing_status', 'worker_notification_decline'].includes(name)) {
                 if (!args || typeof args !== 'object' || Array.isArray(args)) {
                     throw new Error('Notification tool arguments must be an object.');
                 }
-                const expected = name === 'worker_notification_setup' ? [] :
+                const expected = name === 'worker_notification_setup' ? ['notificationSetupToken'] :
                     name === 'worker_notification_pairing_status' ? ['setupId'] : ['notificationRouteId'];
                 if (Object.keys(args).some((key) => !expected.includes(key)) ||
                     (name === 'worker_notification_pairing_status' && typeof args.setupId !== 'string')) {
@@ -148,7 +148,7 @@ export class WorkerGateway {
                 const value = name === 'worker_notification_status'
                     ? this.notifications.status(args.notificationRouteId)
                     : name === 'worker_notification_setup'
-                        ? this.notifications.setup(this.server.address().port)
+                        ? this.notifications.setup(this.server.address().port, args.notificationSetupToken)
                         : name === 'worker_notification_pairing_status'
                             ? this.notifications.pairingStatus(args.setupId)
                             : await this.notifications.decline(args.notificationRouteId);
@@ -213,11 +213,13 @@ export class WorkerGateway {
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
         const upstreamResponse = await this.upstream.forward(forwarded, protocolVersion);
-        if (directStart && route.notificationRouteId && upstreamResponse.status === 200 &&
+        if (directStart && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
-            const result = JSON.parse(upstreamResponse.body)?.result;
-            if (result?.isError !== true && !result?.error) {
-                await this.notifications.trackJob(route.notificationRouteId, result);
+            const message = JSON.parse(upstreamResponse.body);
+            if (message.result && message.result.isError !== true && !message.error) {
+                message.result = await this.notifications.recordDispatch(route.notificationRouteId, message.result);
+
+                return { ...upstreamResponse, body: JSON.stringify(message) };
             }
         }
         if (payload.method === 'initialize' && upstreamResponse.status === 200 &&
@@ -228,7 +230,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Ask once whether the user wants callbacks; if yes use worker_notification_setup, let the user fill the local webhook form, then call worker_notification_pairing_status with setupId and PRIVATELY retain the 64-character notificationRouteId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. After a successful first dispatch ask once whether the user wants callbacks; if yes create and verify the assistant\'s native webhook receiver BEFORE calling worker_notification_setup with the dispatch notificationSetupToken, let the user fill the local webhook form, then call worker_notification_pairing_status with setupId and PRIVATELY retain the 64-character notificationRouteId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
@@ -252,6 +254,161 @@ export class WorkerGateway {
                 description: 'Optional private route handle returned by worker_notification_pairing_status. The Gateway strips it before calling Fleet.',
             };
         }
+        if (workStartTool?.outputSchema?.properties) {
+            workStartTool.outputSchema.properties.notificationSetupToken = {
+                type: 'string', pattern: '^[a-f0-9]{64}
+        for (const extension of this._extensionTools()) {
+            if (occupiedNames.has(extension.name)) {
+                throw new Error(`Upstream tool name collides with extension: ${extension.name}`);
+            }
+        }
+        if (!message.result.nextCursor) {
+            message.result.tools.push(...this._extensionTools());
+        }
+
+        return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
+    }
+
+    async _openDeliveryLink(request, response, pathname) {
+        const port = this.server.address().port;
+        const host = '127.0.0.1:' + port;
+        const remote = request.socket.remoteAddress;
+        if (request.headers.host !== host ||
+            !['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) ||
+            request.headers.origin) {
+            this._sendJSON(response, 403, { error: 'This link can only be opened locally.' });
+            return;
+        }
+
+        response.setHeader('referrer-policy', 'no-referrer');
+        response.setHeader('content-security-policy', "default-src 'none'; sandbox");
+        response.setHeader('x-content-type-options', 'nosniff');
+        try {
+            await this.deliveries.openTicket(pathname.slice('/open-delivery/'.length));
+            response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+            response.end('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>成果資料夾</title><p>已在這台電腦開啟成果資料夾，可以關閉此頁。</p></html>');
+        } catch {
+            this._sendJSON(response, 410, { error: 'This link is unavailable. Ask the assistant for a new folder link.' });
+        }
+    }
+
+    async _handleNotificationPage(request, response, pathname) {
+        const expectedHost = '127.0.0.1:' + this.server.address().port;
+        const origin = 'http://' + expectedHost;
+        const remote = request.socket.remoteAddress;
+        if (request.headers.host !== expectedHost ||
+            !['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) ||
+            (request.method === 'POST' && request.headers.origin !== origin)) {
+            this._sendJSON(response, 403, { error: 'Notification setup is available only on this computer.' });
+            return;
+        }
+
+        response.setHeader('cache-control', 'no-store');
+        response.setHeader('referrer-policy', 'same-origin');
+        response.setHeader('x-frame-options', 'DENY');
+        response.setHeader('x-content-type-options', 'nosniff');
+        response.setHeader('content-security-policy',
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+        const nonce = pathname.slice('/notifications/setup/'.length);
+        try {
+            let page;
+            if (request.method === 'GET') {
+                page = this.notifications.renderSetup(nonce);
+            } else if (request.method === 'POST') {
+                if (!String(request.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded')) {
+                    throw new Error('Expected a form submission.');
+                }
+                let size = 0;
+                const parts = [];
+                for await (const part of request) {
+                    size += part.length;
+                    if (size > 8192) {
+                        throw new Error('Notification settings exceed the supported form size.');
+                    }
+                    parts.push(part);
+                }
+                page = await this.notifications.submitSetup(nonce,
+                    new URLSearchParams(Buffer.concat(parts).toString('utf8')));
+            } else {
+                response.writeHead(405, { allow: 'GET, POST' });
+                response.end();
+                return;
+            }
+            response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            response.end(page);
+        } catch (error) {
+            response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+            response.end('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><p>設定未完成。請確認欄位及 Webhook 接收端，再透過助理重新取得設定連結。</p></html>');
+        }
+    }
+
+    async _handleRequest(request, response) {
+        const pathname = new URL(request.url, 'http://localhost').pathname;
+        if (pathname.startsWith('/notifications/setup/')) {
+            await this._handleNotificationPage(request, response, pathname);
+            return;
+        }
+        if (request.method === 'GET' && pathname.startsWith('/open-delivery/')) {
+            await this._openDeliveryLink(request, response, pathname);
+            return;
+        }
+
+        if (!this._isAuthorized(request)) {
+            response.setHeader('www-authenticate', 'Bearer');
+            this._sendJSON(response, 401, { error: 'Authentication required' });
+            return;
+        }
+
+        if (pathname === '/healthz' && request.method === 'GET') {
+            this._sendJSON(response, 200, { healthy: true, upstreamChecked: false });
+            return;
+        }
+        if (pathname !== '/mcp') {
+            this._sendJSON(response, 404, { error: 'Not found' });
+            return;
+        }
+        if (request.method !== 'POST') {
+            response.setHeader('allow', 'POST');
+            this._sendJSON(response, 405, { error: 'Method not allowed' });
+            return;
+        }
+
+        let payload;
+        try {
+            payload = await this._readPayload(request);
+        } catch (error) {
+            this._sendJSON(response, 400, { error: error.message });
+            return;
+        }
+        const result = await this._handleMCP(payload, request.headers['mcp-protocol-version']);
+        response.writeHead(result.status, {
+            'content-type': result.contentType,
+            'cache-control': 'no-store',
+        });
+        response.end(result.body);
+    }
+
+    async listen() {
+        await this.notifications.initialize();
+        await new Promise((resolve, reject) => {
+            this.server.once('error', reject);
+            this.server.listen(this.config.listenPort, this.config.listenHost, resolve);
+        });
+
+        this.notifications.start();
+        return this.server.address();
+    }
+
+    async close() {
+        this.notifications.close();
+        await new Promise((resolve, reject) => this.server.close((error) => error ? reject(error) : resolve()));
+    }
+}
+,
+                description: 'Private short-lived capability returned only for a new unrouted Job.',
+            };
+        }
+
         const occupiedNames = new Set(message.result.tools.map((tool) => tool.name));
         for (const extension of this._extensionTools()) {
             if (occupiedNames.has(extension.name)) {

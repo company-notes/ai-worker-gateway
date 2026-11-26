@@ -13,7 +13,7 @@ export class NotificationStore {
         this.data = {
             version, cursor: '0', profiles: {
                 default: { name: '預設助理', tokenHash: null, preference: 'unset', webhook: null, enabledAt: null },
-            }, jobs: {}, pending: [],
+            }, jobs: {}, pending: [], initialCursors: {},
         };
         this.writer = Promise.resolve();
     }
@@ -161,9 +161,23 @@ export class NotificationStore {
                 tokenHash: null,
                 preference: settings.webhook ? 'on' : 'off',
                 webhook: settings.webhook ?? null,
-                enabledAt: settings.webhook ? new Date().toISOString() : null,
+                enabledAt: settings.webhook ? (settings.enabledAt ?? new Date().toISOString()) : null,
             };
+
+            if (settings.jobId) {
+                if (state.jobs[settings.jobId]) {
+                    throw new Error('The job is already associated with a different assistant.');
+                }
+                state.jobs[settings.jobId] = profileId;
+
+                if (settings.initial) {
+                    state.initialCursors ??= {};
+                    state.initialCursors[settings.jobId] = settings.initial.id;
+                    state.pending.push({ ...settings.initial, profileId });
+                }
+            }
         });
+
         return routeId;
     }
 

@@ -21,7 +21,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
     assert.equal((await fetch(url)).status, 200);
 
     const form = new URLSearchParams({
-        name: 'Sage', url: scenario.webhookURL,
+        url: scenario.webhookURL,
         header: 'Authorization', secret: 'secret-only-in-local-form',
     });
     const attack = await fetch(url, {
@@ -35,7 +35,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
     try {
         const page = await browser.newPage();
         await page.goto(url);
-        for (const field of ['name', 'url', 'secret']) {
+        for (const field of ['url', 'secret']) {
             await page.locator('[name="' + field + '"]').fill(form.get(field));
         }
 
