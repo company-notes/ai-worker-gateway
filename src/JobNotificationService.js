@@ -247,11 +247,13 @@ export class JobNotificationService {
                 (event.at && profile.enabledAt && event.at < profile.enabledAt)) {
                 continue;
             }
+
             const job = (await this.upstream.callTool('work_status', { jobId: event.jobId })).structuredContent;
             if (!job || job.jobId !== event.jobId || job.state !== event.toState ||
                 job.waitingOnDelegatedWork === true) {
                 continue;
             }
+
             const title = (job.title || '交辦的工作').replace(/\s*\[job:[0-9a-z]+\]\s*$/, '').slice(0, 120);
             const description = job.state === 'idle'
                 ? '這輪處理已結束，請檢查成果是否符合需求。'
