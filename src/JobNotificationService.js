@@ -283,7 +283,7 @@ export class JobNotificationService {
 
         const jobId = response?.structuredContent?.job?.jobId;
         if (!this.store.active || response?.isError === true || response?.structuredContent?.created !== true ||
-            !jobIdPattern.test(jobId) || this.store.data.jobs[jobId]) {
+            typeof jobId !== 'string' || !jobIdPattern.test(jobId) || this.store.data.jobs[jobId]) {
             return response;
         }
 

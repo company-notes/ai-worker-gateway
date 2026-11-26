@@ -25,10 +25,10 @@ OpenMausBot 的 Skill 會按需求觸發，是「可用的程序」，**不是**
 
 這個機制**不依賴 MCP 連線是否專屬某位助理**。例如 GrokBot 所有助理共用同一條 3791 MCP 和同一把授權金鑰，也能設定不同通知接收端。
 
-1. **使用者先決定**：第一次交辦前，助理查是否已有自己私下保存的 `notificationRouteId`；有的話呼叫 `worker_notification_status({notificationRouteId})`，沒有則使用 `worker_notification_status({})`。未配對時問一次「以後完成工作要不要主動通知？」。選「不要」呼叫 `worker_notification_decline({})`，把回傳的停用路由 ID 私下保存；以後不反覆問、不推播。不保存 ID 的助理不能保證下次聊天仍記得這個決定。
-2. **配對 Webhook**：使用者同意才呼叫 `worker_notification_setup({})`；工具回傳 `url`（本機設定頁）及 `setupId`（此配對的短效識別碼）。只把設定頁連結給使用者，讓使用者在本機輸入 Webhook 接收 URL 和 Key，不能要求把 Key 貼到聊天；Gateway 先測試接收端成功回覆 2xx 才加密保存。接收平台必須真的支援接收 Webhook。
-3. **把路由 ID 交回助理**：使用者完成網頁設定後，助理透過 `worker_notification_pairing_status({setupId})` 取回 `paired=true` 與高熵 `notificationRouteId`，並儲存在**助理自己可跨聊天使用的私有設定**中。不應在一般人可見的工作報告中顯示識別碼，也不能讓使用者在 MCP 設定裡手動輸入。
-4. **每次派工指定要通知誰**：助理呼叫原本的 `work_start` 或 Gateway `worker_task_start`，把自己的 `notificationRouteId` 作為額外參數傳給 3791。Gateway 驗證後保存這項工作與 Webhook 的配對、**刪掉額外參數**再傳給原版 Fleet；後續通知按 Job 記錄分流，既有工作續作不必改路由。沒有 ID 時不發自動通知，不可以因所有助理共用 MCP 金鑰就猜某個預設通知目的地。
+1. **先派工再詢問**：安裝／驗證 Skill 與 MCP 不觸發通知設定。第一次交辦先建立真正的 Job 並回報已開始，保存該次回傳的短效私有 notificationSetupToken，再確認通知偏好。未配對時問一次「以後完成工作要不要主動通知？」。選「不要」呼叫 worker_notification_decline({}) 並私下保存停用路由 ID，不再反覆問。
+2. **建立接收端後配對**：使用者同意後，助理先透過 OpenMausBot 的實際 Webhook 能力建立自己的接收端，確認成功及網址／金鑰位置。接著呼叫 worker_notification_setup({notificationSetupToken})，把本機設定頁連結交給使用者，使用者只填網址、金鑰標頭與金鑰，不填助理名稱。Gateway 先測試接收端回覆 2xx 才加密保存並綁定原 Job；不要求把 Key 貼到聊天。
+3. **把路由 ID 交回助理**：使用者完成網頁設定後，助理透過 worker_notification_pairing_status({setupId}) 確認 paired=true、原 Job ID 與私有 notificationRouteId，驗證測試通知實際送達後，把路由 ID 保存在助理自己的私有設定。使用者不需要看見或輸入路由 ID。
+4. **每次派工指定要通知誰**：助理呼叫原本的 `work_start` 或 Gateway `worker_task_start`，把自己的 `notificationRouteId` 作為額外參數傳給 3791。Gateway 驗證後保存這項工作與 Webhook 的配對、**刪掉額外參數**再傳給原版 Fleet；後續通知按 Job 記錄分流，首次 Job 透過短效 token 完成綁定，後續續作不必改路由。沒有 ID 時不發自動通知，不可以因所有助理共用 MCP 金鑰就猜某個預設通知目的地。
 5. **驗收**：例如 Sage、Noodle 共用同一 MCP：讓二位助理各配自己的 Webhook，分別派工，兩個接收端應只收到自己的完成事件。停用 Sage 不應影響 Noodle；假的／停用 ID 必須在建立 Worker Job **之前**被拒絕。接收端需用 `X-AWG-Event-ID` 做去重。`idle` 代表一輪已停止，不一定等於成果已驗證。接收平台須有把 Webhook 傳回自己聊天的能力，不能把接收成功當作聊天已通知成功。
 
 **安全界線**：`notificationRouteId` 是難以猜測的路由能力，而不是共用 MCP 上可信的助理身分；如果其他共用客戶端拿到這個 ID，可能冒用此路由。需將 ID 保存在助理的私有設定、避免在共享日誌或使用者文字中外露；若需求包含防止惡意助理互相冒用，還需額外的可信身分驗證。原版 T3／Fleet 不必修改。
