@@ -34,7 +34,7 @@ async function fixture() {
                     Number(e.cursor) > Number(args.cursor)), nextCursor: cursor, hasMore: false } };
             }
             if (name === 'work_status') {
-                return { structuredContent: { job: jobStates.get(args.jobId) } };
+                return { structuredContent: jobStates.get(args.jobId) };
             }
             throw new Error('Unexpected tool: ' + name);
         },
