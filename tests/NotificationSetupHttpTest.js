@@ -99,3 +99,53 @@ test('decline stores an off-route without any webhook; bogus route is refused be
     });
     assert.equal(rejected.body.result.isError, true);
 });
+
+test('first dispatch precedes consent and a nameless browser pairing binds that same Job', async () => {
+    const isolated = new NotificationScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a reading list', requestId: 'first-dispatch' });
+        const { job, notificationSetupToken } = started.body.result.structuredContent;
+        assert.equal(isolated.dispatches.length, 1);
+        assert.equal(isolated.callbacks.length, 0);
+        assert.match(notificationSetupToken ?? '', /^[a-f0-9]{64}$/, 'First dispatch must return a private attachment capability.');
+
+        const invalid = await isolated.rpc('worker_notification_setup', { notificationSetupToken: '0'.repeat(64) });
+        assert.equal(invalid.body.result.isError, true);
+
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        const { url, setupId } = setup.body.result.structuredContent;
+        const browser = await chromium.launch();
+
+        try {
+            const page = await browser.newPage();
+            await page.goto(url);
+            assert.equal(await page.locator('[name="name"]').count(), 0, 'The owner must not enter an assistant name.');
+            await page.locator('[name="url"]').fill(isolated.webhookURL);
+            await page.locator('[name="secret"]').fill('first-job-receiver-key');
+
+            const [saved] = await Promise.all([
+                page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
+            ]);
+            assert.equal(saved.status(), 200);
+        } finally {
+            await browser.close();
+        }
+
+        const paired = await isolated.rpc('worker_notification_pairing_status', { setupId });
+        const { notificationRouteId, jobId } = paired.body.result.structuredContent;
+        assert.match(notificationRouteId, /^[a-f0-9]{64}$/);
+        assert.equal(jobId, job.jobId);
+        assert.equal(isolated.dispatches.length, 1, 'Pairing must not create another Job.');
+
+        await isolated.finish(job.jobId);
+        assert.equal(isolated.callbacks.length, 2);
+        assert.equal(isolated.callbacks[1].event.jobId, job.jobId);
+
+        const replay = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        assert.equal(replay.body.result.isError, true, 'Attachment capability is single use.');
+    } finally {
+        await isolated.close();
+    }
+});
