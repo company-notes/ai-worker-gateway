@@ -85,7 +85,7 @@ export class NotificationScenario {
 
         assert.equal(name, 'work_status');
 
-        return this._toolResult({ job });
+        return this._toolResult(job);
     }
 
     async start() {
