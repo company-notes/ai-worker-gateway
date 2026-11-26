@@ -247,8 +247,7 @@ export class JobNotificationService {
                 (event.at && profile.enabledAt && event.at < profile.enabledAt)) {
                 continue;
             }
-            const result = (await this.upstream.callTool('work_status', { jobId: event.jobId })).structuredContent;
-            const job = result?.job;
+            const job = (await this.upstream.callTool('work_status', { jobId: event.jobId })).structuredContent;
             if (!job || job.jobId !== event.jobId || job.state !== event.toState ||
                 job.waitingOnDelegatedWork === true) {
                 continue;
