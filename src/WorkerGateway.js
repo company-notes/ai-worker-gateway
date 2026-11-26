@@ -300,7 +300,7 @@ export class WorkerGateway {
         }
 
         response.setHeader('cache-control', 'no-store');
-        response.setHeader('referrer-policy', 'no-referrer');
+        response.setHeader('referrer-policy', 'same-origin');
         response.setHeader('x-frame-options', 'DENY');
         response.setHeader('x-content-type-options', 'nosniff');
         response.setHeader('content-security-policy',
