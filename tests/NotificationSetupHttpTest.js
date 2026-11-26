@@ -65,6 +65,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
         notificationRouteId: route,
     });
     assert.equal(started.body.result.isError, undefined);
+
     const jobID = started.body.result.structuredContent.job.jobId;
     await scenario.finish(jobID);
     assert.equal(scenario.callbacks.length, 2);
@@ -74,6 +75,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
 
     const continued = await scenario.rpc('work_continue', { jobId: jobID, message: 'Add expense splitting', requestId: 'paired-continue' });
     assert.equal(continued.body.result.structuredContent.job.jobId, jobID);
+
     await scenario.finish(jobID);
     assert.equal(scenario.callbacks.length, 3, 'Continuing the same Job must inherit the existing notification route.');
     assert.equal(scenario.callbacks[2].event.jobId, jobID);

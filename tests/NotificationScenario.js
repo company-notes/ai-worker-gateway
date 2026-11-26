@@ -45,6 +45,7 @@ export class NotificationScenario {
         if (input.method === 'initialize') {
             return { protocolVersion: '2025-06-18', serverInfo: { name: 'test-fleet', version: '1' }, capabilities: { tools: {} } };
         }
+
         if (input.method === 'tools/list') {
             return { tools: ['work_start', 'work_continue', 'work_status', 'work_feed', 'work_list'].map((name) => ({
                 name, description: name, inputSchema: { type: 'object', properties: {
@@ -58,9 +59,11 @@ export class NotificationScenario {
             return this._toolResult({ events: this.events.filter((event) => Number(event.cursor) > Number(args.cursor)),
                 nextCursor: String(this.events.length), hasMore: false });
         }
+
         if (name === 'work_list') {
             return this._toolResult({ jobs: [...this.jobs.values()] });
         }
+
         if (name === 'work_start') {
             assert.equal(args.notificationRouteId, undefined, 'Private route must be removed before Fleet dispatch.');
             const job = { jobId: 'routedjob' + (this.jobs.size + 1), state: 'queued', title: args.task };
@@ -69,6 +72,7 @@ export class NotificationScenario {
 
             return this._toolResult({ job, created: true });
         }
+
         const job = this.jobs.get(args.jobId);
         assert.ok(job, 'The work must refer to an existing Job.');
 
@@ -78,7 +82,9 @@ export class NotificationScenario {
 
             return this._toolResult({ job, replayed: false });
         }
+
         assert.equal(name, 'work_status');
+
         return this._toolResult({ job });
     }
 
@@ -145,6 +151,7 @@ export class NotificationScenario {
         if (this.gateway) {
             await this.gateway.close();
         }
+
         await this._close(this.receiver);
         await this._close(this.fleet);
 

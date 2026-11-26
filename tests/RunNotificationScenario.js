@@ -11,9 +11,11 @@ try {
     const commands = createInterface({ input: process.stdin });
     for await (const line of commands) {
         const command = JSON.parse(line);
+
         if (command.jobId) {
             await scenario.finish(command.jobId);
         }
+
         console.log(JSON.stringify({ callbacks: scenario.callbacks, dispatches: scenario.dispatches }));
     }
 } finally {
