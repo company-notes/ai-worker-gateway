@@ -92,7 +92,7 @@ export class JobNotificationService {
         }
         if (routeId === undefined) {
             return { enabled: false, preference: 'unset',
-                detail: 'No notification route has been paired for this assistant. Ask once whether the user wants automatic updates.' };
+                detail: 'No notification route has been paired. After a successful first work dispatch, ask once whether the user wants automatic updates.' };
         }
         const id = this.store.resolveRoute(routeId);
         const profile = this.store.profileFor(id);
@@ -111,21 +111,46 @@ export class JobNotificationService {
         return { notificationRouteId: value, ...this.status(value) };
     }
 
-    setup(port) {
+    _prune(map, now) {
+        for (const [key, value] of map) {
+            if (value.expiresAt <= now) {
+                map.delete(key);
+            }
+        }
+    }
+
+    _serialize(operation) {
+        const result = this.operations.then(operation);
+        this.operations = result.catch(() => {});
+
+        return result;
+    }
+
+    _attachment(token) {
+        const entry = this.attachments.get(token);
+        if (!entry || entry.expiresAt <= Date.now() || this.store.data.jobs[entry.jobId]) {
+            throw new Error('The private Job notification setup token is invalid, expired or already used.');
+        }
+
+        return entry;
+    }
+
+    setup(port, notificationSetupToken) {
         if (!this.store.active) {
             throw new Error('Gateway webhook storage is not enabled.');
         }
         const nonce = randomBytes(24).toString('base64url');
         const now = Date.now();
-        for (const [key, value] of this.tickets) {
-            if (value.expiresAt <= now) {
-                this.tickets.delete(key);
-            }
+        this._prune(this.tickets, now);
+        this._prune(this.attachments, now);
+
+        if (notificationSetupToken !== undefined) {
+            this._attachment(notificationSetupToken);
         }
         if (this.tickets.size >= 50) {
             throw new Error('Too many unused webhook pairing links.');
         }
-        this.tickets.set(nonce, { expiresAt: now + setupTtlMs, notificationRouteId: null, name: null });
+        this.tickets.set(nonce, { expiresAt: now + setupTtlMs, notificationRouteId: null, notificationSetupToken, jobId: null, saving: false });
         return {
             url: 'http://127.0.0.1:' + port + '/notifications/setup/' + nonce,
             setupId: nonce,
@@ -141,7 +166,7 @@ export class JobNotificationService {
             return { paired: false, detail: 'Webhook form not yet submitted successfully.' };
         }
         return {
-            paired: true, assistant: ticket.name,
+            paired: true, ...(ticket.jobId ? { jobId: ticket.jobId } : {}),
             notificationRouteId: ticket.notificationRouteId,
             detail: 'Save this route handle in private assistant configuration; include it with every future new task. Do not show it to the user.',
         };
@@ -169,7 +194,6 @@ export class JobNotificationService {
         return this._page('設定完成通知', '<h1>設定完成通知</h1>' +
             '<p>請輸入這位助理自己的通知接收位址與金鑰。所有助理可以共用原本的 MCP 連線，每位助理只需配對一次。</p>' +
             '<form method="POST" action="' + action + '">' +
-            '<label>助理名稱<input name="name" maxlength="60" required placeholder="例如 Sage"></label>' +
             '<label>Webhook 網址<input name="url" type="url" maxlength="2000" placeholder="https://..." required></label>' +
             '<label>金鑰標頭<select name="header"><option value="Authorization">Authorization: Bearer</option>' +
             '<option value="X-Webhook-Key">X-Webhook-Key</option><option value="X-API-Key">X-API-Key</option>' +
@@ -193,28 +217,95 @@ export class JobNotificationService {
             throw new Error('This webhook pairing was already completed.');
         }
 
-        const name = String(fields.get('name') ?? '').trim();
-        if (!name || name.length > 60 || /[\r\n<>]/.test(name)) {
-            throw new Error('助理名稱不合法。');
+        if (ticket.saving) {
+            throw new Error('This webhook pairing is already being saved.');
         }
+
         const webhook = validateWebhook({
             url: fields.get('url'), header: fields.get('header'), secret: fields.get('secret'),
         });
-        await this.sender.deliver(webhook, {
-            schema: 'ai-worker-gateway.webhook.v1',
-            deliveryId: 'test-' + randomBytes(12).toString('hex'),
-            event: 'work.webhook_test', assistant: name,
-            task: '通知連線測試', jobId: null, state: 'test',
-            occurredAt: new Date().toISOString(),
-            message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
-        });
+        ticket.saving = true;
 
-        const notificationRouteId = await this.store.createRoute({ name, webhook });
-        ticket.notificationRouteId = notificationRouteId;
-        ticket.name = name;
+        try {
+            await this.sender.deliver(webhook, {
+                schema: 'ai-worker-gateway.webhook.v1',
+                deliveryId: 'test-' + randomBytes(12).toString('hex'),
+                event: 'work.webhook_test', assistant: '助理',
+                task: '通知連線測試', jobId: null, state: 'test',
+                occurredAt: new Date().toISOString(),
+                message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
+            });
+
+            await this._serialize(() => this._savePairing(ticket, webhook));
+        } finally {
+            ticket.saving = false;
+        }
         return this._page('通知設定成功', '<h1>Webhook 配對成功</h1>' +
             '<p>請回到助理。助理會完成配對確認並在後續派工時自動使用這條通知路線。</p>' +
             '<p>原有 MCP 連線及其共用金鑰都不需要改動。</p>');
+    }
+
+    async _savePairing(ticket, webhook) {
+        const enabledAt = new Date().toISOString();
+        const token = ticket.notificationSetupToken;
+        const attachment = token === undefined ? null : this._attachment(token);
+        let initial = null;
+
+        if (attachment) {
+            const job = (await this.upstream.callTool('work_status', { jobId: attachment.jobId })).structuredContent;
+            if (!job || job.jobId !== attachment.jobId) {
+                throw new Error('The originally dispatched Job could not be verified.');
+            }
+
+            if (notifyingStates.has(job.state) && job.waitingOnDelegatedWork !== true) {
+                const event = (job.recentEvents ?? []).filter((item) =>
+                    item.jobId === job.jobId && item.type === 'state_changed' &&
+                    item.toState === job.state && /^\d{1,15}$/.test(item.cursor))
+                    .sort((a, b) => Number(b.cursor) - Number(a.cursor))[0];
+
+                if (event) {
+                    initial = this._notification(null, { name: '助理' }, job, event);
+                }
+            }
+        }
+
+        ticket.notificationRouteId = await this.store.createRoute({
+            name: '助理', webhook, enabledAt, jobId: attachment?.jobId, initial,
+        });
+        ticket.jobId = attachment?.jobId ?? null;
+
+        if (attachment) {
+            this.attachments.delete(token);
+        }
+    }
+
+    async recordDispatch(routeId, response) {
+        if (routeId !== undefined) {
+            await this.trackJob(routeId, response);
+            return response;
+        }
+
+        const jobId = response?.structuredContent?.job?.jobId;
+        if (!this.store.active || response?.isError === true || response?.structuredContent?.created !== true ||
+            typeof jobId !== 'string' || !jobIdPattern.test(jobId) || this.store.data.jobs[jobId]) {
+            return response;
+        }
+
+        const now = Date.now();
+        this._prune(this.attachments, now);
+        if (this.attachments.size >= 5000) {
+            return response;
+        }
+
+        const notificationSetupToken = randomBytes(32).toString('hex');
+        this.attachments.set(notificationSetupToken, { jobId, expiresAt: now + attachmentTtlMs });
+
+        return {
+            ...response,
+            structuredContent: { ...response.structuredContent, notificationSetupToken },
+            content: [...response.content, { type: 'text', text: JSON.stringify({ notificationSetupToken,
+                instruction: 'Keep private. After dispatch ask once about notifications; pass this token to worker_notification_setup only after consent and receiver creation.' }) }],
+        };
     }
 
     async trackJob(routeId, response) {
@@ -239,18 +330,38 @@ export class JobNotificationService {
         return feed;
     }
 
+    _notification(profileId, profile, job, event) {
+        const title = (job.title || '交辦的工作').replace(/\s*\[job:[0-9a-z]+\]\s*$/, '').slice(0, 120);
+        const description = job.state === 'idle'
+            ? '這輪處理已結束，請檢查成果是否符合需求。'
+            : job.state === 'needs_input'
+                ? '工作需要使用者回覆或授權。'
+                : '工作執行出現問題，請查看詳情。';
+        return {
+            id: String(event.cursor), profileId,
+            payload: {
+                schema: 'ai-worker-gateway.webhook.v1', deliveryId: String(event.cursor),
+                event: job.state === 'idle' ? 'work.turn_finished' : 'work.' + job.state,
+                assistant: profile.name, task: title,
+                jobId: event.jobId, state: job.state,
+                occurredAt: event.at ?? new Date().toISOString(), message: description,
+            },
+        };
+    }
+
     async _collect(events) {
         const notifications = [];
         for (const event of events) {
             if (event.type !== 'state_changed' ||
-                !['idle', 'needs_input', 'failed', 'cancelled'].includes(event.toState) ||
+                !notifyingStates.has(event.toState) ||
                 !jobIdPattern.test(event.jobId)) {
                 continue;
             }
             const profileId = this.store.data.jobs[event.jobId];
             const profile = profileId && this.store.profileFor(profileId);
             if (!profile || profile.preference !== 'on' || !profile.webhook ||
-                (event.at && profile.enabledAt && event.at < profile.enabledAt)) {
+                (event.at && profile.enabledAt && event.at < profile.enabledAt) ||
+                Number(event.cursor) <= Number(this.store.data.initialCursors?.[event.jobId] ?? 0)) {
                 continue;
             }
 
@@ -260,22 +371,7 @@ export class JobNotificationService {
                 continue;
             }
 
-            const title = (job.title || '交辦的工作').replace(/\s*\[job:[0-9a-z]+\]\s*$/, '').slice(0, 120);
-            const description = job.state === 'idle'
-                ? '這輪處理已結束，請檢查成果是否符合需求。'
-                : job.state === 'needs_input'
-                    ? '工作需要使用者回覆或授權。'
-                    : '工作執行出現問題，請查看詳情。';
-            notifications.push({
-                id: String(event.cursor), profileId,
-                payload: {
-                    schema: 'ai-worker-gateway.webhook.v1', deliveryId: String(event.cursor),
-                    event: job.state === 'idle' ? 'work.turn_finished' : 'work.' + job.state,
-                    assistant: profile.name, task: title,
-                    jobId: event.jobId, state: job.state,
-                    occurredAt: event.at ?? new Date().toISOString(), message: description,
-                },
-            });
+            notifications.push(this._notification(profileId, profile, job, event));
         }
         return notifications;
     }
@@ -286,36 +382,40 @@ export class JobNotificationService {
         }
         this.working = true;
         try {
-            for (let page = 0; page < 100; page++) {
-                const cursor = this.store.data.cursor;
-                const feed = await this._feed(cursor);
-                const notifications = await this._collect(feed.events);
-                if (feed.hasMore && feed.nextCursor === cursor) {
-                    throw new Error('Work feed cursor did not advance.');
-                }
-                if (feed.events.length || feed.nextCursor !== cursor) {
-                    await this.store.stageEvents(notifications, feed.nextCursor);
-                }
-                if (!feed.hasMore) {
-                    break;
-                }
-            }
-
-            for (const item of [...this.store.data.pending]) {
-                const profile = this.store.profileFor(item.profileId);
-                if (!profile || profile.preference !== 'on' || !profile.webhook) {
-                    await this.store.removeDelivered(item.id);
-                    continue;
-                }
-                try {
-                    await this.sender.deliver(profile.webhook, item.payload);
-                    await this.store.removeDelivered(item.id);
-                } catch {
-                    console.warn('A webhook notification could not be delivered; it will be retried.');
-                }
-            }
+            await this._serialize(() => this._poll());
         } finally {
             this.working = false;
+        }
+    }
+
+    async _poll() {
+        for (let page = 0; page < 100; page++) {
+            const cursor = this.store.data.cursor;
+            const feed = await this._feed(cursor);
+            const notifications = await this._collect(feed.events);
+            if (feed.hasMore && feed.nextCursor === cursor) {
+                throw new Error('Work feed cursor did not advance.');
+            }
+            if (feed.events.length || feed.nextCursor !== cursor) {
+                await this.store.stageEvents(notifications, feed.nextCursor);
+            }
+            if (!feed.hasMore) {
+                break;
+            }
+        }
+
+        for (const item of [...this.store.data.pending]) {
+            const profile = this.store.profileFor(item.profileId);
+            if (!profile || profile.preference !== 'on' || !profile.webhook) {
+                await this.store.removeDelivered(item.id);
+                continue;
+            }
+            try {
+                await this.sender.deliver(profile.webhook, item.payload);
+                await this.store.removeDelivered(item.id);
+            } catch {
+                console.warn('A webhook notification could not be delivered; it will be retried.');
+            }
         }
     }
 
