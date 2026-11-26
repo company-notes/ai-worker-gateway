@@ -222,6 +222,7 @@ export class WorkerGateway {
                 return { ...upstreamResponse, body: JSON.stringify(message) };
             }
         }
+
         if (payload.method === 'initialize' && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);

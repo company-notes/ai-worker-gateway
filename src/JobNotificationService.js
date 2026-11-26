@@ -128,6 +128,7 @@ export class JobNotificationService {
 
     _attachment(token) {
         const entry = this.attachments.get(token);
+
         if (!entry || entry.expiresAt <= Date.now() || this.store.data.jobs[entry.jobId]) {
             throw new Error('The private Job notification setup token is invalid, expired or already used.');
         }
@@ -139,6 +140,7 @@ export class JobNotificationService {
         if (!this.store.active) {
             throw new Error('Gateway webhook storage is not enabled.');
         }
+
         const nonce = randomBytes(24).toString('base64url');
         const now = Date.now();
         this._prune(this.tickets, now);
@@ -151,6 +153,7 @@ export class JobNotificationService {
             throw new Error('Too many unused webhook pairing links.');
         }
         this.tickets.set(nonce, { expiresAt: now + setupTtlMs, notificationRouteId: null, notificationSetupToken, jobId: null, saving: false });
+
         return {
             url: 'http://127.0.0.1:' + port + '/notifications/setup/' + nonce,
             setupId: nonce,
@@ -240,6 +243,7 @@ export class JobNotificationService {
         } finally {
             ticket.saving = false;
         }
+
         return this._page('通知設定成功', '<h1>Webhook 配對成功</h1>' +
             '<p>請回到助理。助理會完成配對確認並在後續派工時自動使用這條通知路線。</p>' +
             '<p>原有 MCP 連線及其共用金鑰都不需要改動。</p>');
@@ -293,6 +297,7 @@ export class JobNotificationService {
 
         const now = Date.now();
         this._prune(this.attachments, now);
+
         if (this.attachments.size >= 5000) {
             return response;
         }

@@ -128,6 +128,7 @@ test('first dispatch precedes consent and a nameless browser pairing binds that 
         await isolated.start();
         const started = await isolated.rpc('work_start', { task: 'Build a reading list', requestId: 'first-dispatch' });
         const { job, notificationSetupToken } = started.body.result.structuredContent;
+
         assert.equal(isolated.dispatches.length, 1);
         assert.equal(isolated.callbacks.length, 0);
         assert.match(notificationSetupToken ?? '', /^[a-f0-9]{64}$/, 'First dispatch must return a private attachment capability.');
