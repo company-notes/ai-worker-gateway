@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { chromium } from 'playwright';
 import { WorkerConfig } from '../src/WorkerConfig.js';
 import { WorkerGateway } from '../src/WorkerGateway.js';
 
@@ -13,6 +14,8 @@ let fleet;
 let gateway;
 let address;
 let testsSent;
+let receiver;
+let webhookURL;
 
 async function rpc(name, args = {}, key = sharedMcpKey) {
     const response = await fetch(address + '/mcp', {
@@ -28,6 +31,18 @@ async function rpc(name, args = {}, key = sharedMcpKey) {
 before(async () => {
     folder = await mkdtemp(path.join(os.tmpdir(), 'awg-form-route-test-'));
     testsSent = [];
+    receiver = createServer(async (request, response) => {
+        const chunks = [];
+        for await (const chunk of request) {
+            chunks.push(chunk);
+        }
+        testsSent.push({ authorization: request.headers.authorization, event: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+        response.writeHead(204);
+        response.end();
+    });
+    await new Promise((resolve) => receiver.listen(0, '127.0.0.1', resolve));
+    webhookURL = 'http://127.0.0.1:' + receiver.address().port + '/callback';
+
     fleet = createServer(async (req, res) => {
         const chunks = [];
         for await (const part of req) chunks.push(part);
@@ -54,13 +69,14 @@ before(async () => {
         AWG_NOTIFICATION_STATE_DIR: folder,
         AWG_UPSTREAM_MCP_URL: 'http://127.0.0.1:' + fleet.address().port + '/mcp',
         AWG_LISTEN_PORT: '0',
-    }), { webhookSender: { deliver: async (_settings, event) => { testsSent.push(event); } } });
+    }));
     await gateway.listen();
     address = 'http://127.0.0.1:' + gateway.server.address().port;
 });
 
 after(async () => {
     await gateway.close();
+    await new Promise((resolve) => receiver.close(resolve));
     await new Promise((resolve) => fleet.close(resolve));
     await rm(folder, { recursive: true, force: true });
 });
@@ -79,7 +95,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
     assert.equal((await fetch(url)).status, 200);
 
     const form = new URLSearchParams({
-        name: 'Sage', url: 'https://example.invalid/callback',
+        name: 'Sage', url: webhookURL,
         header: 'Authorization', secret: 'secret-only-in-local-form',
     });
     const attack = await fetch(url, {
@@ -89,13 +105,23 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
     });
     assert.equal(attack.status, 403);
 
-    const legitimate = await fetch(url, {
-        method: 'POST',
-        headers: { origin: address, 'content-type': 'application/x-www-form-urlencoded' },
-        body: form,
-    });
-    assert.equal(legitimate.status, 200);
-    assert.doesNotMatch(await legitimate.text(), /secret-only-in-local-form|[a-f0-9]{64}/);
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage();
+        await page.goto(url);
+        for (const field of ['name', 'url', 'secret']) {
+            await page.locator('[name="' + field + '"]').fill(form.get(field));
+        }
+
+        const [legitimate] = await Promise.all([
+            page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
+        ]);
+        assert.equal(legitimate.status(), 200, 'A real same-origin browser must be able to authorize notifications.');
+        assert.match(await page.locator('body').innerText(), /Webhook 配對成功/);
+        assert.doesNotMatch(await page.content(), /secret-only-in-local-form|[a-f0-9]{64}/);
+    } finally {
+        await browser.close();
+    }
 
     const paired = await rpc('worker_notification_pairing_status', { setupId });
     const route = paired.body.result.structuredContent.notificationRouteId;
@@ -104,7 +130,9 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
         notificationRouteId: route,
     })).body.result.structuredContent.enabled, true);
     assert.equal((await fetch(url)).status, 200, 'Pairing GET may display a safe confirmation page.');
-    assert.equal(testsSent.filter((x) => x.event === 'work.webhook_test').length, 1);
+    assert.equal(testsSent.length, 1);
+    assert.equal(testsSent[0].authorization, 'Bearer secret-only-in-local-form');
+    assert.equal(testsSent[0].event.event, 'work.webhook_test');
 
     const started = await rpc('work_start', {
         task: 'Make an analysis', requestId: 'paired-start',
