@@ -129,17 +129,17 @@ export class WorkerGateway {
                     ? this._routeFromArguments(args)
                     : { notificationRouteId: undefined, cleaned: args };
                 const result = await this.taskDispatch.run(name, route.cleaned);
-                if (name === 'worker_task_start' && route.notificationRouteId) {
-                    await this.notifications.trackJob(route.notificationRouteId, result);
-                }
-                return this._extensionResult(payload.id, result);
+                const recorded = name === 'worker_task_start'
+                    ? await this.notifications.recordDispatch(route.notificationRouteId, result) : result;
+
+                return this._extensionResult(payload.id, recorded);
             }
             if (['worker_notification_status', 'worker_notification_setup',
                 'worker_notification_pairing_status', 'worker_notification_decline'].includes(name)) {
                 if (!args || typeof args !== 'object' || Array.isArray(args)) {
                     throw new Error('Notification tool arguments must be an object.');
                 }
-                const expected = name === 'worker_notification_setup' ? [] :
+                const expected = name === 'worker_notification_setup' ? ['notificationSetupToken'] :
                     name === 'worker_notification_pairing_status' ? ['setupId'] : ['notificationRouteId'];
                 if (Object.keys(args).some((key) => !expected.includes(key)) ||
                     (name === 'worker_notification_pairing_status' && typeof args.setupId !== 'string')) {
@@ -148,7 +148,7 @@ export class WorkerGateway {
                 const value = name === 'worker_notification_status'
                     ? this.notifications.status(args.notificationRouteId)
                     : name === 'worker_notification_setup'
-                        ? this.notifications.setup(this.server.address().port)
+                        ? this.notifications.setup(this.server.address().port, args.notificationSetupToken)
                         : name === 'worker_notification_pairing_status'
                             ? this.notifications.pairingStatus(args.setupId)
                             : await this.notifications.decline(args.notificationRouteId);
@@ -213,13 +213,16 @@ export class WorkerGateway {
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
         const upstreamResponse = await this.upstream.forward(forwarded, protocolVersion);
-        if (directStart && route.notificationRouteId && upstreamResponse.status === 200 &&
+        if (directStart && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
-            const result = JSON.parse(upstreamResponse.body)?.result;
-            if (result?.isError !== true && !result?.error) {
-                await this.notifications.trackJob(route.notificationRouteId, result);
+            const message = JSON.parse(upstreamResponse.body);
+            if (message.result && message.result.isError !== true && !message.error) {
+                message.result = await this.notifications.recordDispatch(route.notificationRouteId, message.result);
+
+                return { ...upstreamResponse, body: JSON.stringify(message) };
             }
         }
+
         if (payload.method === 'initialize' && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
@@ -228,7 +231,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Ask once whether the user wants callbacks; if yes use worker_notification_setup, let the user fill the local webhook form, then call worker_notification_pairing_status with setupId and PRIVATELY retain the 64-character notificationRouteId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. After a successful first dispatch ask once whether the user wants callbacks; if yes create and verify the assistant\'s native webhook receiver BEFORE calling worker_notification_setup with the dispatch notificationSetupToken, let the user fill the local webhook form, then call worker_notification_pairing_status with setupId and PRIVATELY retain the 64-character notificationRouteId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
@@ -252,6 +255,13 @@ export class WorkerGateway {
                 description: 'Optional private route handle returned by worker_notification_pairing_status. The Gateway strips it before calling Fleet.',
             };
         }
+        if (workStartTool?.outputSchema?.properties) {
+            workStartTool.outputSchema.properties.notificationSetupToken = {
+                type: 'string', pattern: '^[a-f0-9]{64}$',
+                description: 'Private short-lived capability returned only for a new unrouted Job.',
+            };
+        }
+
         const occupiedNames = new Set(message.result.tools.map((tool) => tool.name));
         for (const extension of this._extensionTools()) {
             if (occupiedNames.has(extension.name)) {

@@ -140,8 +140,8 @@ test('two assistants use one MCP connection but dispatch to different notificati
         'Route handle is wrapper-local metadata and must never reach the strict upstream Fleet schema.');
     const jobs = gateway.notifications.store.data.jobs;
     assert.notEqual(jobs.sharedjob1, jobs.sharedjob2);
-    assert.equal(gateway.notifications.store.profileFor(jobs.sharedjob1).name, 'Sage');
-    assert.equal(gateway.notifications.store.profileFor(jobs.sharedjob2).name, 'Noodle');
+    assert.equal(jobs.sharedjob1, gateway.notifications.resolveRoute(globalThis.testRoute));
+    assert.equal(jobs.sharedjob2, gateway.notifications.resolveRoute(noodleRoute));
 
     const bad = await rpc('work_start', {
         task: 'Unexpected work', requestId: 'badroute1',

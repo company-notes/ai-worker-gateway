@@ -21,7 +21,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
     assert.equal((await fetch(url)).status, 200);
 
     const form = new URLSearchParams({
-        name: 'Sage', url: scenario.webhookURL,
+        url: scenario.webhookURL,
         header: 'Authorization', secret: 'secret-only-in-local-form',
     });
     const attack = await fetch(url, {
@@ -35,7 +35,7 @@ test('pairing form is local-only, same-origin and does not leak receiver secret 
     try {
         const page = await browser.newPage();
         await page.goto(url);
-        for (const field of ['name', 'url', 'secret']) {
+        for (const field of ['url', 'secret']) {
             await page.locator('[name="' + field + '"]').fill(form.get(field));
         }
 
@@ -98,4 +98,91 @@ test('decline stores an off-route without any webhook; bogus route is refused be
         notificationRouteId: route,
     });
     assert.equal(rejected.body.result.isError, true);
+});
+
+class FirstJobPairingScenario extends NotificationScenario {
+    async authorize(url) {
+        const browser = await chromium.launch();
+
+        try {
+            const page = await browser.newPage();
+            await page.goto(url);
+            assert.equal(await page.locator('[name="name"]').count(), 0, 'The owner must not enter an assistant name.');
+            await page.locator('[name="url"]').fill(this.webhookURL);
+            await page.locator('[name="secret"]').fill('first-job-receiver-key');
+
+            const [saved] = await Promise.all([
+                page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
+            ]);
+            assert.equal(saved.status(), 200);
+        } finally {
+            await browser.close();
+        }
+    }
+}
+
+test('first dispatch precedes consent and a nameless browser pairing binds that same Job', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a reading list', requestId: 'first-dispatch' });
+        const { job, notificationSetupToken } = started.body.result.structuredContent;
+
+        assert.equal(isolated.dispatches.length, 1);
+        assert.equal(isolated.callbacks.length, 0);
+        assert.match(notificationSetupToken ?? '', /^[a-f0-9]{64}$/, 'First dispatch must return a private attachment capability.');
+
+        const invalid = await isolated.rpc('worker_notification_setup', { notificationSetupToken: '0'.repeat(64) });
+        assert.equal(invalid.body.result.isError, true);
+
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        const { url, setupId } = setup.body.result.structuredContent;
+        await isolated.authorize(url);
+
+        const paired = await isolated.rpc('worker_notification_pairing_status', { setupId });
+        const { notificationRouteId, jobId } = paired.body.result.structuredContent;
+        assert.match(notificationRouteId, /^[a-f0-9]{64}$/);
+        assert.equal(jobId, job.jobId);
+        assert.equal(isolated.dispatches.length, 1, 'Pairing must not create another Job.');
+
+        await isolated.finish(job.jobId);
+        assert.equal(isolated.callbacks.length, 2);
+        assert.equal(isolated.callbacks[1].event.jobId, job.jobId);
+
+        const replay = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        assert.equal(replay.body.result.isError, true, 'Attachment capability is single use.');
+    } finally {
+        await isolated.close();
+    }
+});
+
+test('a Job completed before consent is delivered once after the owner pairs, and continuation still notifies', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a quick note', requestId: 'fast-job' });
+        const { job, notificationSetupToken } = started.body.result.structuredContent;
+
+        await isolated.finish(job.jobId);
+        assert.equal(isolated.callbacks.length, 0, 'No notifications before consent.');
+
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        await isolated.authorize(setup.body.result.structuredContent.url);
+        await isolated.gateway.notifications.poll();
+        assert.equal(isolated.callbacks.length, 2);
+        assert.equal(isolated.callbacks[1].event.jobId, job.jobId);
+        assert.equal(isolated.callbacks[1].event.event, 'work.turn_finished');
+
+        await isolated.gateway.notifications.poll();
+        assert.equal(isolated.callbacks.length, 2, 'The catch-up event must not be duplicated.');
+
+        await isolated.rpc('work_continue', { jobId: job.jobId, message: 'Add tags', requestId: 'fast-continue' });
+        await isolated.finish(job.jobId);
+        assert.equal(isolated.callbacks.length, 3);
+        assert.notEqual(isolated.callbacks[1].event.deliveryId, isolated.callbacks[2].event.deliveryId);
+    } finally {
+        await isolated.close();
+    }
 });

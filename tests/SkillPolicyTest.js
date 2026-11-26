@@ -29,6 +29,9 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     assert.match(source, /worker_notification_setup/);
     assert.match(source, /worker_notification_decline/);
     assert.match(source, /不要自行預設同意/);
+    assert.match(source, /第一次交辦先實際派工/);
+    assert.match(source, /建立成功後才呼叫 `worker_notification_setup/);
+    assert.match(source, /表單不需要助理名稱/);
     assert.match(source, /同一把 MCP 金鑰.*分流/);
     assert.match(source, /worker_notification_pairing_status/);
     assert.match(source, /通知已開啟時.*notificationRouteId/);
