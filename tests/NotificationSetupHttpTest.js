@@ -458,17 +458,34 @@ test('local owner configures connection notifications before any Job and the ded
         });
         assert.notEqual(other.data.notificationRouteId, saved.data.notificationRouteId);
 
+        const jobs = [];
         for (const route of [saved.data.notificationRouteId, other.data.notificationRouteId]) {
             const started = await isolated.rpc('work_start', {
                 task: 'Build a walking tracker', requestId: 'connection-' + route.slice(0, 8), notificationRouteId: route,
             });
             assert.equal(started.body.result.structuredContent.notificationBound, true);
-            await isolated.finish(started.body.result.structuredContent.job.jobId);
+            const jobId = started.body.result.structuredContent.job.jobId;
+            jobs.push(jobId);
+            await isolated.finish(jobId);
         }
 
-        assert.deepEqual(isolated.callbacks.filter((item) => item.event.event === 'work.turn_finished')
-            .map((item) => item.authorization), ['Bearer owner-connection-key', 'Bearer other-connection-key']);
+        const denied = await isolated.rpc('work_continue', {
+            jobId: jobs[0], message: 'Do not send to another assistant', requestId: 'wrong-connection',
+            notificationRouteId: other.data.notificationRouteId,
+        });
+        assert.equal(denied.body.result.isError, true, 'A different dedicated route must not continue this Job.');
         assert.equal(isolated.dispatches.length, 2);
+
+        const continued = await isolated.rpc('work_continue', {
+            jobId: jobs[0], message: 'Add a weekly goal', requestId: 'correct-connection',
+            notificationRouteId: saved.data.notificationRouteId,
+        });
+        assert.equal(continued.body.result.structuredContent.notificationBound, true);
+        await isolated.finish(jobs[0]);
+
+        assert.deepEqual(isolated.callbacks.filter((item) => item.event.event === 'work.turn_finished')
+            .map((item) => item.authorization), ['Bearer owner-connection-key', 'Bearer other-connection-key', 'Bearer owner-connection-key']);
+        assert.equal(isolated.dispatches.length, 3);
     } finally {
         await isolated.close();
     }
