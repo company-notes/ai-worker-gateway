@@ -120,6 +120,7 @@ export class NotificationScenario {
             response.end(JSON.stringify({ jsonrpc: '2.0', id: input.id, result }));
         });
         this.upstreamURL = await this._listen(this.fleet) + '/mcp';
+
         await this._startGateway();
     }
 

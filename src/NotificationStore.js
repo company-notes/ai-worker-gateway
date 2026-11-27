@@ -161,6 +161,7 @@ export class NotificationStore {
 
     pairingReceipt(setupId) {
         const receipt = this.data.pairingReceipts?.[this._receiptHash(setupId)];
+
         if (!receipt || receipt.expiresAt <= Date.now()) {
             return null;
         }

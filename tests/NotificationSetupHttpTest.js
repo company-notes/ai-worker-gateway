@@ -242,7 +242,9 @@ test('an owner can authorize now and the assistant can claim the route after lin
         const setup = await isolated.rpc('worker_notification_setup');
         const { url, setupId } = setup.body.result.structuredContent;
         const browserNonce = new URL(url).pathname.split('/').at(-1);
+
         assert.notEqual(browserNonce, setupId, 'The public browser URL cannot be the private claim credential.');
+
         await isolated.authorize(url);
         assert.equal(isolated.callbacks.length, 1, 'The owner received the real webhook test.');
 
@@ -277,6 +279,7 @@ test('an owner can authorize now and the assistant can claim the route after lin
             jobId: jobID, message: 'Add annual totals', requestId: 'delayed-pairing-continue',
         });
         assert.equal(continued.body.result.structuredContent.job.jobId, jobID);
+
         await isolated.finish(jobID);
         assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
             ['work.webhook_test', 'work.turn_finished', 'work.turn_finished']);

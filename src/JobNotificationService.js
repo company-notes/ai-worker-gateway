@@ -166,6 +166,7 @@ export class JobNotificationService {
 
     pairingStatus(setupId) {
         const receipt = this.store.pairingReceipt(setupId);
+
         if (receipt) {
             return {
                 paired: true, ...receipt,
@@ -174,6 +175,7 @@ export class JobNotificationService {
         }
 
         const ticket = [...this.tickets.values()].find((entry) => entry.setupId === setupId);
+
         if (!ticket || ticket.expiresAt <= Date.now()) {
             throw new Error('No successful pairing receipt is available for this identifier. If authorization was not completed, request a new link.');
         }
