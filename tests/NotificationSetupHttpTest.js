@@ -186,3 +186,45 @@ test('a Job completed before consent is delivered once after the owner pairs, an
         await isolated.close();
     }
 });
+
+test('owner can retry a rejected key on the same page and paste the complete Rakazo Authorization header', async () => {
+    const isolated = new NotificationScenario();
+    const key = 'disposable-rakazo-receiver-key';
+    isolated.receiverAuthorization = 'Bearer ' + key;
+
+    try {
+        await isolated.start();
+        const setup = await isolated.rpc('worker_notification_setup');
+        const { url, setupId } = setup.body.result.structuredContent;
+        const browser = await chromium.launch();
+
+        try {
+            const page = await browser.newPage();
+            await page.goto(url);
+            await page.locator('[name="url"]').fill(isolated.webhookURL);
+            await page.locator('[name="secret"]').fill('incorrect-key');
+            const [rejected] = await Promise.all([
+                page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
+            ]);
+            assert.equal(rejected.status(), 400);
+            assert.equal((await isolated.rpc('worker_notification_pairing_status', { setupId })).body.result.structuredContent.paired, false);
+
+            await page.goBack();
+            await page.locator('[name="url"]').fill(isolated.webhookURL);
+            await page.locator('[name="secret"]').fill('Authorization: Bearer ' + key);
+            const [saved] = await Promise.all([
+                page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
+            ]);
+            assert.equal(saved.status(), 200, 'Complete copied Authorization header must be accepted on the same unexpired link.');
+            assert.equal(isolated.callbacks.length, 1);
+            assert.equal(isolated.callbacks[0].authorization, 'Bearer ' + key);
+            assert.doesNotMatch(await page.content(), /disposable-rakazo-receiver-key/);
+        } finally {
+            await browser.close();
+        }
+
+        assert.equal((await isolated.rpc('worker_notification_pairing_status', { setupId })).body.result.structuredContent.paired, true);
+    } finally {
+        await isolated.close();
+    }
+});
