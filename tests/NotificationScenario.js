@@ -77,6 +77,7 @@ export class NotificationScenario {
         assert.ok(job, 'The work must refer to an existing Job.');
 
         if (name === 'work_continue') {
+            assert.equal(args.notificationRouteId, undefined, 'Private route must be removed before Fleet continuation.');
             job.state = 'queued';
             this.dispatches.push({ name, args });
 
