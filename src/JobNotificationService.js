@@ -229,9 +229,7 @@ export class JobNotificationService {
                 return this.renderSetup(nonce);
             }
 
-            if (ticket.notificationSetupToken !== undefined) {
-                this._attachment(ticket.notificationSetupToken);
-            }
+            this._attachment(ticket.notificationSetupToken);
         } catch {
             return this._page('設定連結已失效', '<h1>設定連結已失效</h1><p>請回到助理重新取得設定連結；不需要重新派工或配對 Worker。</p>');
         }
@@ -289,23 +287,20 @@ export class JobNotificationService {
         const enabledAt = new Date().toISOString();
         const token = ticket.notificationSetupToken;
         const attachment = this._attachment(token);
+        const job = (await this.upstream.callTool('work_status', { jobId: attachment.jobId })).structuredContent;
+        if (!job || job.jobId !== attachment.jobId) {
+            throw new Error('The originally dispatched Job could not be verified.');
+        }
+
         let initial = null;
+        if (notifyingStates.has(job.state) && job.waitingOnDelegatedWork !== true) {
+            const event = (job.recentEvents ?? []).filter((item) =>
+                item.jobId === job.jobId && this._isNotificationEvent(item) &&
+                item.toState === job.state && /^\d{1,15}$/.test(item.cursor))
+                .sort((a, b) => Number(b.cursor) - Number(a.cursor))[0];
 
-        {
-            const job = (await this.upstream.callTool('work_status', { jobId: attachment.jobId })).structuredContent;
-            if (!job || job.jobId !== attachment.jobId) {
-                throw new Error('The originally dispatched Job could not be verified.');
-            }
-
-            if (notifyingStates.has(job.state) && job.waitingOnDelegatedWork !== true) {
-                const event = (job.recentEvents ?? []).filter((item) =>
-                    item.jobId === job.jobId && item.type === 'state_changed' &&
-                    item.toState === job.state && /^\d{1,15}$/.test(item.cursor))
-                    .sort((a, b) => Number(b.cursor) - Number(a.cursor))[0];
-
-                if (event) {
-                    initial = this._notification(null, { name: '助理' }, job, event);
-                }
+            if (event) {
+                initial = this._notification(null, { name: '助理' }, job, event);
             }
         }
 
@@ -326,7 +321,7 @@ export class JobNotificationService {
 
     describeBinding(response) {
         const jobId = response?.structuredContent?.job?.jobId;
-        if (!jobIdPattern.test(jobId) || response.isError === true) {
+        if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || response.isError === true) {
             return response;
         }
 
@@ -377,7 +372,7 @@ export class JobNotificationService {
         }
         const profileId = this.resolveRoute(routeId);
         const job = response?.structuredContent?.job;
-        if (jobIdPattern.test(job?.jobId) && response?.isError !== true) {
+        if (typeof job?.jobId === 'string' && jobIdPattern.test(job.jobId) && response?.isError !== true) {
             await this.store.trackJob(profileId, job.jobId);
         }
     }
@@ -412,12 +407,18 @@ export class JobNotificationService {
         };
     }
 
+    _isNotificationEvent(event) {
+        // Fleet can observe an entire external turn between two idle checks.
+        // State transitions already have their own event, so only handle same-state turn_finished here.
+        return (event.type === 'state_changed' && notifyingStates.has(event.toState)) ||
+            (event.type === 'turn_finished' && event.fromState === 'idle' && event.toState === 'idle');
+    }
+
     async _collect(events) {
         const notifications = [];
         for (const event of events) {
-            if (event.type !== 'state_changed' ||
-                !notifyingStates.has(event.toState) ||
-                !jobIdPattern.test(event.jobId)) {
+            if (!this._isNotificationEvent(event) ||
+                typeof event.jobId !== 'string' || !jobIdPattern.test(event.jobId)) {
                 continue;
             }
             const profileId = this.store.data.jobs[event.jobId];

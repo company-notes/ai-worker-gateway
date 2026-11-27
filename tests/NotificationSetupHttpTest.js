@@ -305,12 +305,18 @@ test('missing first Job token cannot create a misleading receiver-only pairing',
     try {
         await isolated.start();
         const started = await isolated.rpc('work_start', { task: 'Build a habit tracker', requestId: 'habit-first' });
-        const { job, notificationSetupToken } = started.body.result.structuredContent;
+        const { job, notificationSetupToken, notificationBound } = started.body.result.structuredContent;
+        assert.equal(notificationBound, false);
         const missing = await isolated.rpc('worker_notification_setup', {});
         assert.equal(missing.body.result.isError, true, 'An omitted Job token must fail before a form can be issued.');
         assert.equal(isolated.callbacks.length, 0);
+        const unbound = await isolated.rpc('work_continue', {
+            jobId: job.jobId, message: 'Refine existing requirements', requestId: 'habit-unbound-followup',
+        });
+        assert.equal(unbound.body.result.structuredContent.notificationBound, false);
 
         const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        assert.equal(setup.body.result.structuredContent.jobId, job.jobId);
         await isolated.authorize(setup.body.result.structuredContent.url);
         const paired = await isolated.rpc('worker_notification_pairing_status', { setupId: setup.body.result.structuredContent.setupId });
         assert.equal(paired.body.result.structuredContent.jobId, job.jobId);
