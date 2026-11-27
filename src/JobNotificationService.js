@@ -328,14 +328,17 @@ export class JobNotificationService {
         }
 
         const notificationBound = this._isBound(jobId);
+        const structuredContent = { ...response.structuredContent, notificationBound };
+        const instruction = notificationBound
+            ? 'This Job has an enabled notification route; only promise delivery to this assistant if you verified its pairing.'
+            : structuredContent.notificationSetupToken
+                ? 'Save the private jobId and notificationSetupToken now. Check worker_notification_status using your own saved route, or empty arguments if none. If preference is unset, ask once now whether the owner wants automatic completion notifications. On consent, create the native receiver in the same turn and call worker_notification_setup with the required token. Never display private identifiers.'
+                : 'This Job has NO enabled notification binding. Do not promise completion notifications or call setup without the original private token.';
 
         return {
             ...response,
-            structuredContent: { ...response.structuredContent, notificationBound },
-            content: [...response.content, { type: 'text', text: JSON.stringify({ jobId, notificationBound,
-                instruction: notificationBound
-                    ? 'This Job has an enabled notification route; only promise delivery to this assistant if you verified its pairing.'
-                    : 'This Job has NO enabled notification binding. Do not promise completion notifications.' }) }],
+            structuredContent,
+            content: [{ type: 'text', text: JSON.stringify({ ...structuredContent, instruction }) }, ...response.content],
         };
     }
 
@@ -364,8 +367,6 @@ export class JobNotificationService {
         return this.describeBinding({
             ...response,
             structuredContent: { ...response.structuredContent, notificationSetupToken },
-            content: [...response.content, { type: 'text', text: JSON.stringify({ notificationSetupToken,
-                instruction: 'Persist this private token with the original Job before asking about notifications. After consent, create the receiver and use this REQUIRED token in worker_notification_setup; never call setup with empty arguments.' }) }],
         });
     }
 
