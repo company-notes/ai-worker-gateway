@@ -289,3 +289,34 @@ test('an owner can authorize now and the assistant can claim the route after lin
         await isolated.close();
     }
 });
+
+test('missing first Job token cannot create a misleading receiver-only pairing', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a habit tracker', requestId: 'habit-first' });
+        const { job, notificationSetupToken } = started.body.result.structuredContent;
+        const missing = await isolated.rpc('worker_notification_setup', {});
+        assert.equal(missing.body.result.isError, true, 'An omitted Job token must fail before a form can be issued.');
+        assert.equal(isolated.callbacks.length, 0);
+
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        await isolated.authorize(setup.body.result.structuredContent.url);
+        const paired = await isolated.rpc('worker_notification_pairing_status', { setupId: setup.body.result.structuredContent.setupId });
+        assert.equal(paired.body.result.structuredContent.jobId, job.jobId);
+        assert.equal(paired.body.result.structuredContent.notificationBound, true);
+
+        await isolated.finish(job.jobId);
+        const continued = await isolated.rpc('work_continue', {
+            jobId: job.jobId, message: 'Add weekly targets', requestId: 'habit-followup',
+        });
+        assert.equal(continued.body.result.structuredContent.notificationBound, true);
+
+        await isolated.finish(job.jobId);
+        assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
+            ['work.webhook_test', 'work.turn_finished', 'work.turn_finished']);
+    } finally {
+        await isolated.close();
+    }
+});
