@@ -3,20 +3,24 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 
-const blocked = new BlockList();
+// Separate address families: Node BlockList also matches IPv4 against mapped IPv6 ranges.
+const blockedIPv4 = new BlockList();
+const blockedIPv6 = new BlockList();
+
 for (const [subnet, bits] of [
     ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10],
     ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
     ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
     ['224.0.0.0', 4], ['240.0.0.0', 4],
 ]) {
-    blocked.addSubnet(subnet, bits, 'ipv4');
+    blockedIPv4.addSubnet(subnet, bits, 'ipv4');
 }
+
 for (const [subnet, bits] of [
     ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10],
     ['ff00::', 8], ['::ffff:0:0', 96],
 ]) {
-    blocked.addSubnet(subnet, bits, 'ipv6');
+    blockedIPv6.addSubnet(subnet, bits, 'ipv6');
 }
 
 /** Errors safe to present to the owner without exposing receiver credentials. */
@@ -121,7 +125,8 @@ export class WebhookSender {
 
         if (!Array.isArray(entries) || entries.length === 0 ||
             entries.some(({ address, family }) =>
-                ![4, 6].includes(family) || blocked.check(address, family === 4 ? 'ipv4' : 'ipv6'))) {
+                ![4, 6].includes(family) || isIP(address) !== family ||
+                (family === 4 ? blockedIPv4.check(address, 'ipv4') : blockedIPv6.check(address, 'ipv6')))) {
             throw new WebhookError('Webhook 網址解析到不允許的私人網路位址。');
         }
 
