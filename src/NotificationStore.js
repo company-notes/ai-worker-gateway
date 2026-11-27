@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { AssistantIdentity } from './AssistantIdentity.js';
 
 const version = 1;
 const pairingReceiptTtlMs = 30 * 24 * 60 * 60_000;
@@ -162,35 +163,36 @@ export class NotificationStore {
         return id;
     }
 
-    connectionRoute(connectionId) {
-        if (typeof connectionId !== 'string' || !/^[a-f0-9]{64}$/.test(connectionId)) {
-            throw new Error('Invalid dedicated Worker connection identifier.');
-        }
+    assistantRoute(connectionId, identity) {
+        const key = AssistantIdentity.scopedKey(connectionId, identity);
 
-        return createHmac('sha256', this.secret).update('notification-connection:' + connectionId).digest('hex');
+        return createHmac('sha256', this.secret).update('notification-assistant:' + key).digest('hex');
     }
 
-    connectionStatus(connectionId) {
-        const routeId = this.connectionRoute(connectionId);
+    assistantStatus(connectionId, identity) {
+        const routeId = this.assistantRoute(connectionId, identity);
         const id = this._findRoute(this.data, routeId);
         const profile = id && this.profileFor(id);
 
-        if (!profile?.webhook || profile.preference !== 'on') {
-            return { enabled: false };
+        if (!profile) {
+            return { registered: false, enabled: false };
         }
 
-        return { enabled: true, notificationRouteId: routeId };
+        return { registered: true, enabled: profile.preference === 'on' && !!profile.webhook,
+            notificationRouteId: routeId };
     }
 
-    async configureConnection(connectionId, webhook) {
-        const routeId = this.connectionRoute(connectionId);
+    async configureAssistant(connectionId, identity, webhook) {
+        const routeId = this.assistantRoute(connectionId, identity);
 
         await this.change((state) => {
             const id = this._findRoute(state, routeId) ?? randomUUID();
-            state.profiles[id] = this._profile(routeId, { name: '助理', webhook });
+            const profile = this._profile(routeId, { name: '助理', webhook });
+            profile.manual = webhook === null;
+            state.profiles[id] = profile;
         });
 
-        return this.connectionStatus(connectionId);
+        return this.assistantStatus(connectionId, identity);
     }
 
     _profile(routeId, settings) {

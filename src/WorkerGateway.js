@@ -6,6 +6,7 @@ import { TaskDispatchService } from './TaskDispatchService.js';
 import { WorkspaceProvisionService } from './WorkspaceProvisionService.js';
 import { DeliveryService } from './DeliveryService.js';
 import { JobNotificationService } from './JobNotificationService.js';
+import { AssistantIdentity } from './AssistantIdentity.js';
 import { WebhookError } from './WebhookSender.js';
 
 export class WorkerGateway {
@@ -243,7 +244,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Dedicated Studio connections authorize their own native webhook receiver locally before dispatch; Studio injects the private route and checks continuation ownership. Direct Gateway connections and existing shared connections use verified private routing capabilities only, never an inferred identity from a common key. Follow the installed Session Router Skill and actual tool catalog. Verify notificationBound on each start and continuation before promising callbacks. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Studio authorizes each assistant's native webhook receiver locally before dispatch. Studio resolves the supplied assistant identity to the private route and Gateway checks continuation ownership. Direct Gateway connections and existing shared connections use verified private routing capabilities only, never an inferred identity from a common key. Follow the installed Session Router Skill and actual tool catalog. Verify notificationBound on each start and continuation before promising callbacks. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
@@ -373,22 +374,33 @@ export class WorkerGateway {
         }
     }
 
-    async _handleConnectionNotification(request, response, connectionId) {
+    async _handleAssistantNotification(request, response, suffix) {
         const host = '127.0.0.1:' + this.server.address().port;
 
         if (request.headers.host !== host || request.headers.origin ||
             !['127.0.0.1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)) {
-            this._sendJSON(response, 403, { error: 'Connection notifications can only be configured locally by Studio.' });
+            this._sendJSON(response, 403, { error: 'Assistant notifications can only be configured locally by Studio.' });
             return;
         }
 
-        if (!/^[a-f0-9]{64}$/.test(connectionId)) {
-            this._sendJSON(response, 400, { error: 'Invalid dedicated Worker connection identifier.' });
+        const parts = suffix.split('/');
+        let identity;
+
+        try {
+            if (parts.length !== 2 || !/^[a-f0-9]{64}$/.test(parts[0])) {
+                throw new Error('Invalid authorized Worker connection.');
+            }
+
+            identity = AssistantIdentity.fromPath(parts[1]);
+        } catch (error) {
+            console.warn('Invalid local assistant identity: ' + error.name);
+            this._sendJSON(response, 400, { error: 'Invalid assistant identity.' });
             return;
         }
 
+        const connectionId = parts[0];
         if (request.method === 'GET') {
-            this._sendJSON(response, 200, this.notifications.connectionStatus(connectionId));
+            this._sendJSON(response, 200, this.notifications.assistantStatus(connectionId, identity));
             return;
         }
         if (request.method !== 'PUT') {
@@ -403,12 +415,17 @@ export class WorkerGateway {
             }
 
             const settings = await this._readJSON(request, 8192);
-            const result = await this.notifications.configureConnection(connectionId, settings);
+            if (!settings || typeof settings !== 'object' || Object.keys(settings).length !== 1 ||
+                !Object.hasOwn(settings, 'webhook')) {
+                throw new WebhookError('請提供助理的通知接收端設定。');
+            }
+
+            const result = await this.notifications.configureAssistant(connectionId, identity, settings.webhook);
 
             this._sendJSON(response, 200, result);
         } catch (error) {
             const message = WebhookError.messageFor(error);
-            console.warn('Connection notification configuration failed: ' + message);
+            console.warn('Assistant notification configuration failed: ' + message);
             this._sendJSON(response, 400, { error: message });
         }
     }
@@ -430,8 +447,8 @@ export class WorkerGateway {
             return;
         }
 
-        if (pathname.startsWith('/notifications/connections/')) {
-            await this._handleConnectionNotification(request, response, pathname.slice('/notifications/connections/'.length));
+        if (pathname.startsWith('/notifications/assistants/')) {
+            await this._handleAssistantNotification(request, response, pathname.slice('/notifications/assistants/'.length));
             return;
         }
 

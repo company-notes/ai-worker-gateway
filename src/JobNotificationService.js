@@ -80,7 +80,7 @@ export class JobNotificationService {
         }
         const id = this.store.resolveRoute(routeId);
         const profile = this.store.profileFor(id);
-        if (profile.preference !== 'on' || !profile.webhook) {
+        if (profile.manual !== true && (profile.preference !== 'on' || !profile.webhook)) {
             throw new Error('Notification route is disabled. Cannot bind new work to it.');
         }
         return id;
@@ -258,21 +258,27 @@ export class JobNotificationService {
         });
     }
 
-    connectionStatus(connectionId) {
-        return this.store.connectionStatus(connectionId);
+    assistantStatus(connectionId, identity) {
+        return this.store.assistantStatus(connectionId, identity);
     }
 
-    async configureConnection(connectionId, settings) {
+    async configureAssistant(connectionId, identity, settings) {
         if (!this.store.active) {
             throw new WebhookError('Gateway 尚未啟用通知儲存。');
         }
+        if (settings === null && identity.type !== 'agentAddress') {
+            throw new WebhookError('Bot 必須設定 Webhook 通知接收端。');
+        }
 
-        this.store.connectionRoute(connectionId);
-        const webhook = validateWebhook(settings);
+        this.store.assistantRoute(connectionId, identity);
+        const webhook = settings === null ? null : validateWebhook(settings);
 
         return this._serialize(async () => {
-            await this._verifyWebhook(webhook);
-            return this.store.configureConnection(connectionId, webhook);
+            if (webhook !== null) {
+                await this._verifyWebhook(webhook);
+            }
+
+            return this.store.configureAssistant(connectionId, identity, webhook);
         });
     }
 
@@ -343,8 +349,9 @@ export class JobNotificationService {
     }
 
     verifyContinuation(routeId, jobId) {
-        if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || !this._isBound(jobId, routeId)) {
-            throw new Error('This Job is not bound to the authorized notification connection. Use the original assistant connection.');
+        const profileId = this.resolveRoute(routeId);
+        if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || this.store.data.jobs[jobId] !== profileId) {
+            throw new Error('This Job is not bound to the specified assistant. Use the original assistant identity.');
         }
     }
 
