@@ -45,6 +45,9 @@ before(async () => {
                 structuredContent: { job: {
                     jobId: 'sharedjob' + (++nextJobId), state: 'queued',
                 }, created: true } };
+        } else if (message.method === 'tools/call' && message.params.name === 'work_status') {
+            result = { content: [{ type: 'text', text: 'status' }],
+                structuredContent: { jobId: message.params.arguments.jobId, state: 'queued' } };
         } else if (message.method === 'tools/call' && message.params.name === 'work_feed') {
             result = { content: [{ type: 'text', text: 'events' }],
                 structuredContent: { events: [], nextCursor: '0', hasMore: false } };
@@ -82,7 +85,8 @@ after(async () => {
 });
 
 test('webhook setup pairs to an opaque route handle, without issuing a different MCP credential', async () => {
-    const setup = await rpc('worker_notification_setup');
+    const first = await rpc('work_start', { task: 'Sage first task', requestId: 'sage-first' });
+    const setup = await rpc('worker_notification_setup', { notificationSetupToken: first.result.structuredContent.notificationSetupToken });
     assert.equal(setup.result.isError, false);
     const url = setup.result.structuredContent.url;
     const setupId = setup.result.structuredContent.setupId;
@@ -111,7 +115,8 @@ test('webhook setup pairs to an opaque route handle, without issuing a different
 });
 
 test('two assistants use one MCP connection but dispatch to different notification destinations', async () => {
-    const setup = await rpc('worker_notification_setup');
+    const first = await rpc('work_start', { task: 'Noodle first task', requestId: 'noodle-first' });
+    const setup = await rpc('worker_notification_setup', { notificationSetupToken: first.result.structuredContent.notificationSetupToken });
     const sent = await fetch(setup.result.structuredContent.url, {
         method: 'POST', headers: {
             origin: address, 'content-type': 'application/x-www-form-urlencoded',
@@ -135,7 +140,7 @@ test('two assistants use one MCP connection but dispatch to different notificati
         assert.equal(started.result.isError, undefined);
     }
     const calls = forwarded.filter((p) => p.params?.name === 'work_start');
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4);
     assert.ok(calls.every((p) => p.params.arguments.notificationRouteId === undefined),
         'Route handle is wrapper-local metadata and must never reach the strict upstream Fleet schema.');
     const jobs = gateway.notifications.store.data.jobs;
@@ -148,14 +153,14 @@ test('two assistants use one MCP connection but dispatch to different notificati
         notificationRouteId: '0'.repeat(64),
     });
     assert.equal(bad.result.isError, true);
-    assert.equal(forwarded.filter((p) => p.params?.name === 'work_start').length, 2,
+    assert.equal(forwarded.filter((p) => p.params?.name === 'work_start').length, 4,
         'An unknown or forged notification route must be rejected BEFORE launching any T3 job.');
 
     const noRoute = await rpc('work_start', {
         task: 'No notifications', requestId: 'norequest',
     });
     assert.equal(noRoute.result.isError, undefined);
-    assert.equal(jobs.sharedjob3, undefined,
+    assert.equal(gateway.notifications.store.data.jobs.sharedjob5, undefined,
         'A shared MCP connection does not imply a default assistant or notification route.');
 });
 
@@ -171,7 +176,7 @@ test('wrapper worker_task_start also accepts the same private route and strips m
         notificationRouteId: globalThis.testRoute,
     });
     assert.notEqual(result.result.isError, true);
-    assert.equal(gateway.notifications.store.data.jobs.sharedjob4,
+    assert.equal(gateway.notifications.store.data.jobs.sharedjob6,
         gateway.notifications.resolveRoute(globalThis.testRoute));
     const calls = forwarded.filter((p) => p.params?.name === 'work_start');
     const last = calls.at(-1);

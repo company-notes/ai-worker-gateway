@@ -47,7 +47,10 @@ async function fixture() {
         header: 'Authorization', secret: key,
     });
     const pair = async (name, key) => {
-        const setup = service.setup(3791);
+        const job = { jobId: 'initial' + name.toLowerCase(), state: 'queued' };
+        jobStates.set(job.jobId, job);
+        const started = await service.recordDispatch(undefined, { structuredContent: { job, created: true }, content: [] });
+        const setup = service.setup(3791, started.structuredContent.notificationSetupToken);
         const nonce = new URL(setup.url).pathname.split('/').at(-1);
         assert.equal(service.pairingStatus(setup.setupId).paired, false);
 

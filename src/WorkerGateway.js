@@ -197,6 +197,7 @@ export class WorkerGateway {
         }
 
         const directStart = payload.method === 'tools/call' && payload.params?.name === 'work_start';
+        const directContinue = payload.method === 'tools/call' && payload.params?.name === 'work_continue';
         let route;
         try {
             route = directStart
@@ -213,11 +214,13 @@ export class WorkerGateway {
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
         const upstreamResponse = await this.upstream.forward(forwarded, protocolVersion);
-        if (directStart && upstreamResponse.status === 200 &&
+        if ((directStart || directContinue) && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
             if (message.result && message.result.isError !== true && !message.error) {
-                message.result = await this.notifications.recordDispatch(route.notificationRouteId, message.result);
+                message.result = directStart
+                    ? await this.notifications.recordDispatch(route.notificationRouteId, message.result)
+                    : this.notifications.describeBinding(message.result);
 
                 return { ...upstreamResponse, body: JSON.stringify(message) };
             }
@@ -260,6 +263,15 @@ export class WorkerGateway {
                 type: 'string', pattern: '^[a-f0-9]{64}$',
                 description: 'Private short-lived capability returned only for a new unrouted Job.',
             };
+        }
+
+        for (const name of ['work_start', 'work_continue']) {
+            const tool = message.result.tools.find((candidate) => candidate.name === name);
+            if (tool?.outputSchema?.properties) {
+                tool.outputSchema.properties.notificationBound = {
+                    type: 'boolean', description: 'Whether this Job actually has an enabled notification route. False means no automatic completion callback.',
+                };
+            }
         }
 
         const occupiedNames = new Set(message.result.tools.map((tool) => tool.name));

@@ -15,7 +15,10 @@ test('the shared MCP bearer authorizes tools, but does not identify a bot or rev
 });
 
 test('pairing form is local-only, same-origin and does not leak receiver secret to MCP', async () => {
-    const setup = await scenario.rpc('worker_notification_setup');
+    const startedForPairing = await scenario.rpc('work_start', { task: 'Prepare initial work', requestId: 'browser-pairing' });
+    const setup = await scenario.rpc('worker_notification_setup', {
+        notificationSetupToken: startedForPairing.body.result.structuredContent.notificationSetupToken,
+    });
     const { setupId, url } = setup.body.result.structuredContent;
     assert.ok(url.startsWith(scenario.address));
     assert.equal((await fetch(url)).status, 200);
@@ -194,7 +197,10 @@ test('owner can retry a rejected key on the same page and paste the complete Rak
 
     try {
         await isolated.start();
-        const setup = await isolated.rpc('worker_notification_setup');
+        const started = await isolated.rpc('work_start', { task: 'Build a small tool', requestId: 'retry-pairing' });
+        const setup = await isolated.rpc('worker_notification_setup', {
+            notificationSetupToken: started.body.result.structuredContent.notificationSetupToken,
+        });
         const { url, setupId } = setup.body.result.structuredContent;
         const browser = await chromium.launch();
 
@@ -239,7 +245,10 @@ test('an owner can authorize now and the assistant can claim the route after lin
 
     try {
         await isolated.start();
-        const setup = await isolated.rpc('worker_notification_setup');
+        const startedForPairing = await isolated.rpc('work_start', { task: 'Build initial tool', requestId: 'durable-pairing' });
+        const setup = await isolated.rpc('worker_notification_setup', {
+            notificationSetupToken: startedForPairing.body.result.structuredContent.notificationSetupToken,
+        });
         const { url, setupId } = setup.body.result.structuredContent;
         const browserNonce = new URL(url).pathname.split('/').at(-1);
 
