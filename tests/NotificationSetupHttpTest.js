@@ -203,6 +203,7 @@ test('owner can retry a rejected key on the same page and paste the complete Rak
             await page.goto(url);
             await page.locator('[name="url"]').fill(isolated.webhookURL);
             await page.locator('[name="secret"]').fill('incorrect-key');
+
             const [rejected] = await Promise.all([
                 page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
             ]);
@@ -215,6 +216,7 @@ test('owner can retry a rejected key on the same page and paste the complete Rak
             // The rejected form itself is reusable, without a new setup link.
             await page.locator('[name="url"]').fill(isolated.webhookURL);
             await page.locator('[name="secret"]').fill('Authorization: Bearer ' + key);
+
             const [saved] = await Promise.all([
                 page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
             ]);

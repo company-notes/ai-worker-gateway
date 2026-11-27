@@ -86,6 +86,7 @@ export function validateWebhook(webhook) {
         (!local && isIP(url.hostname.replace(/^\[|\]$/g, '')) !== 0)) {
         throw new WebhookError('通知網址必須使用 HTTPS；同機測試只允許 http://127.0.0.1。');
     }
+
     if (url.port && (Number(url.port) < 1 || Number(url.port) > 65535)) {
         throw new WebhookError('通知網址的連接埠不合法。');
     }
@@ -115,7 +116,9 @@ export class WebhookSender {
         if (url.protocol === 'http:' && url.hostname === '127.0.0.1') {
             return { address: '127.0.0.1', family: 4 };
         }
+
         const entries = await this.resolve(url.hostname, { all: true, verbatim: true });
+
         if (!Array.isArray(entries) || entries.length === 0 ||
             entries.some(({ address, family }) =>
                 ![4, 6].includes(family) || blocked.check(address, family === 4 ? 'ipv4' : 'ipv6'))) {
@@ -130,12 +133,14 @@ export class WebhookSender {
         const target = new URL(settings.url);
         const ip = await this._resolveAddress(target);
         const body = Buffer.from(JSON.stringify(payload), 'utf8');
+
         if (body.length > 16_384) {
             throw new Error('Webhook event exceeds size limit');
         }
 
         const keyValue = settings.header.toLowerCase() === 'authorization' ? 'Bearer ' + settings.secret : settings.secret;
         const transport = target.protocol === 'https:' ? httpsRequest : httpRequest;
+
         await new Promise((resolve, reject) => {
             const request = transport(target, {
                 method: 'POST',

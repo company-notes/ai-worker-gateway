@@ -211,6 +211,7 @@ export class JobNotificationService {
     renderSetupFailure(nonce, error) {
         try {
             const ticket = this._ticket(nonce);
+
             if (ticket.notificationRouteId) {
                 return this.renderSetup(nonce);
             }

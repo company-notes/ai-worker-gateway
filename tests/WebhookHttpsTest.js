@@ -19,6 +19,7 @@ test('a DNS-pinned HTTPS hostname receives an authenticated event with certifica
     const callbacks = [];
     const receiver = createServer({ key, cert }, async (request, response) => {
         const chunks = [];
+
         for await (const chunk of request) {
             chunks.push(chunk);
         }
@@ -37,6 +38,7 @@ test('a DNS-pinned HTTPS hostname receives an authenticated event with certifica
         const sender = new LocalReceiverSender();
         const event = { deliveryId: 'test-https', event: 'work.webhook_test' };
         const url = 'https://webhook.test:' + receiver.address().port + '/callback';
+
         for (const secret of ['disposable-test-key', 'Bearer disposable-test-key',
             'Authorization: Bearer disposable-test-key']) {
             await sender.deliver({ url, header: 'Authorization', secret }, event);
