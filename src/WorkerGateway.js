@@ -205,9 +205,13 @@ export class WorkerGateway {
         const directContinue = payload.method === 'tools/call' && payload.params?.name === 'work_continue';
         let route;
         try {
-            route = directStart
+            route = directStart || directContinue
                 ? this._routeFromArguments(payload.params.arguments)
                 : { notificationRouteId: undefined, cleaned: null };
+
+            if (directContinue && route.notificationRouteId !== undefined) {
+                this.notifications.verifyContinuation(route.notificationRouteId, route.cleaned.jobId);
+            }
         } catch (error) {
             return {
                 status: 200,
@@ -215,7 +219,7 @@ export class WorkerGateway {
                 contentType: 'application/json',
             };
         }
-        const forwarded = directStart && route.notificationRouteId
+        const forwarded = (directStart || directContinue) && route.notificationRouteId
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
         const upstreamResponse = await this.upstream.forward(forwarded, protocolVersion);

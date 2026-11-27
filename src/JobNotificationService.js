@@ -342,6 +342,12 @@ export class JobNotificationService {
             (routeId === undefined || this.store.resolveRoute(routeId) === profileId);
     }
 
+    verifyContinuation(routeId, jobId) {
+        if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || !this._isBound(jobId, routeId)) {
+            throw new Error('This Job is not bound to the authorized notification connection. Use the original assistant connection.');
+        }
+    }
+
     describeBinding(response) {
         const jobId = response?.structuredContent?.job?.jobId;
 
