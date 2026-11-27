@@ -375,6 +375,7 @@ export class WorkerGateway {
 
     async _handleConnectionNotification(request, response, connectionId) {
         const host = '127.0.0.1:' + this.server.address().port;
+
         if (request.headers.host !== host || request.headers.origin ||
             !['127.0.0.1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)) {
             this._sendJSON(response, 403, { error: 'Connection notifications can only be configured locally by Studio.' });
@@ -403,6 +404,7 @@ export class WorkerGateway {
 
             const settings = await this._readJSON(request, 8192);
             const result = await this.notifications.configureConnection(connectionId, settings);
+
             this._sendJSON(response, 200, result);
         } catch (error) {
             const message = WebhookError.messageFor(error);

@@ -149,6 +149,7 @@ export class NotificationStore {
                 return id;
             }
         }
+
         return null;
     }
 
@@ -183,6 +184,7 @@ export class NotificationStore {
 
     async configureConnection(connectionId, webhook) {
         const routeId = this.connectionRoute(connectionId);
+
         await this.change((state) => {
             const id = this._findRoute(state, routeId) ?? randomUUID();
             state.profiles[id] = this._profile(routeId, { name: '助理', webhook });
