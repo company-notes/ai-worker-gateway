@@ -207,9 +207,12 @@ test('owner can retry a rejected key on the same page and paste the complete Rak
                 page.waitForNavigation(), page.getByRole('button', { name: '測試並儲存通知' }).click(),
             ]);
             assert.equal(rejected.status(), 400);
+            assert.match(await page.getByRole('alert').innerText(), /HTTP 401/);
+            assert.equal(await page.locator('[name="secret"]').inputValue(), '');
+            assert.doesNotMatch(await page.content(), /incorrect-key/);
             assert.equal((await isolated.rpc('worker_notification_pairing_status', { setupId })).body.result.structuredContent.paired, false);
 
-            await page.goBack();
+            // The rejected form itself is reusable, without a new setup link.
             await page.locator('[name="url"]').fill(isolated.webhookURL);
             await page.locator('[name="secret"]').fill('Authorization: Bearer ' + key);
             const [saved] = await Promise.all([

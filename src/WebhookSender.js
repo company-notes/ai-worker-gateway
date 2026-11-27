@@ -30,6 +30,15 @@ export class WebhookError extends Error {
             return '無法解析 Webhook 網址，請確認接收網址是否正確。';
         }
 
+        if (['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error?.code)) {
+            return '無法連線到 Webhook 接收端，請確認 Routine 已啟用且可連線。';
+        }
+
+        if (['CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+            'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID'].includes(error?.code)) {
+            return 'Webhook 接收端的 HTTPS 憑證驗證失敗。';
+        }
+
         return '無法完成通知設定，請確認 Webhook 接收端及 Gateway 狀態。';
     }
 }
@@ -83,7 +92,7 @@ export function validateWebhook(webhook) {
 
     const header = webhook.header || 'Authorization';
     const value = webhook.secret;
-    if (!/^(?:Authorization|X-[A-Za-z0-9-]{1,60})$/i.test(header) ||
+    if (typeof header !== 'string' || !/^(?:Authorization|X-[A-Za-z0-9-]{1,60})$/i.test(header) ||
         /^(?:X-Forwarded-|X-Original-|X-Real-)/i.test(header) ||
         typeof value !== 'string' || !value.trim() ||
         value.length > 2048 || /[\r\n\0]/.test(value)) {

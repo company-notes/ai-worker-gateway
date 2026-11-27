@@ -36,10 +36,16 @@ test('a DNS-pinned HTTPS hostname receives an authenticated event with certifica
         await new Promise((resolve) => receiver.listen(0, '127.0.0.1', resolve));
         const sender = new LocalReceiverSender();
         const event = { deliveryId: 'test-https', event: 'work.webhook_test' };
-        await sender.deliver({ url: 'https://webhook.test:' + receiver.address().port + '/callback',
-            header: 'Authorization', secret: 'disposable-test-key' }, event);
+        const url = 'https://webhook.test:' + receiver.address().port + '/callback';
+        for (const secret of ['disposable-test-key', 'Bearer disposable-test-key',
+            'Authorization: Bearer disposable-test-key']) {
+            await sender.deliver({ url, header: 'Authorization', secret }, event);
+        }
 
-        assert.deepEqual(callbacks, [{ authorization: 'Bearer disposable-test-key', event }]);
+        assert.equal(callbacks.length, 3);
+        for (const callback of callbacks) {
+            assert.deepEqual(callback, { authorization: 'Bearer disposable-test-key', event });
+        }
     } finally {
         globalAgent.options.ca = previousCA;
         receiver.closeAllConnections();
