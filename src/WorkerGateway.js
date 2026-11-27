@@ -6,6 +6,7 @@ import { TaskDispatchService } from './TaskDispatchService.js';
 import { WorkspaceProvisionService } from './WorkspaceProvisionService.js';
 import { DeliveryService } from './DeliveryService.js';
 import { JobNotificationService } from './JobNotificationService.js';
+import { WebhookError } from './WebhookSender.js';
 
 export class WorkerGateway {
     constructor(config, services = {}) {
@@ -46,17 +47,21 @@ export class WorkerGateway {
         return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
     }
 
-    async _readPayload(request) {
+    async _readJSON(request, limit = 1_048_576) {
         const chunks = [];
         let size = 0;
         for await (const chunk of request) {
             size += chunk.length;
-            if (size > 1_048_576) {
+            if (size > limit) {
                 throw new Error('Request exceeds maximum payload size');
             }
             chunks.push(chunk);
         }
-        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    }
+
+    async _readPayload(request) {
+        const payload = await this._readJSON(request);
         if (Array.isArray(payload) || payload === null || typeof payload !== 'object' || payload.jsonrpc !== '2.0') {
             throw new Error('Expected one JSON-RPC 2.0 request');
         }
@@ -364,6 +369,44 @@ export class WorkerGateway {
         }
     }
 
+    async _handleConnectionNotification(request, response, connectionId) {
+        const host = '127.0.0.1:' + this.server.address().port;
+        if (request.headers.host !== host || request.headers.origin ||
+            !['127.0.0.1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)) {
+            this._sendJSON(response, 403, { error: 'Connection notifications can only be configured locally by Studio.' });
+            return;
+        }
+
+        if (!/^[a-f0-9]{64}$/.test(connectionId)) {
+            this._sendJSON(response, 400, { error: 'Invalid dedicated Worker connection identifier.' });
+            return;
+        }
+
+        if (request.method === 'GET') {
+            this._sendJSON(response, 200, this.notifications.connectionStatus(connectionId));
+            return;
+        }
+        if (request.method !== 'PUT') {
+            response.setHeader('allow', 'GET, PUT');
+            this._sendJSON(response, 405, { error: 'Method not allowed' });
+            return;
+        }
+
+        try {
+            if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) {
+                throw new WebhookError('請提供 JSON 通知設定。');
+            }
+
+            const settings = await this._readJSON(request, 8192);
+            const result = await this.notifications.configureConnection(connectionId, settings);
+            this._sendJSON(response, 200, result);
+        } catch (error) {
+            const message = WebhookError.messageFor(error);
+            console.warn('Connection notification configuration failed: ' + message);
+            this._sendJSON(response, 400, { error: message });
+        }
+    }
+
     async _handleRequest(request, response) {
         const pathname = new URL(request.url, 'http://localhost').pathname;
         if (pathname.startsWith('/notifications/setup/')) {
@@ -378,6 +421,11 @@ export class WorkerGateway {
         if (!this._isAuthorized(request)) {
             response.setHeader('www-authenticate', 'Bearer');
             this._sendJSON(response, 401, { error: 'Authentication required' });
+            return;
+        }
+
+        if (pathname.startsWith('/notifications/connections/')) {
+            await this._handleConnectionNotification(request, response, pathname.slice('/notifications/connections/'.length));
             return;
         }
 

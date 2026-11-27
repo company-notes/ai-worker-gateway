@@ -139,16 +139,67 @@ export class NotificationStore {
         return createHmac('sha256', this.secret).update('notification-route:' + routeId).digest('hex');
     }
 
-    resolveRoute(routeId) {
+    _findRoute(state, routeId) {
         const hashed = this._routeHash(routeId);
-        for (const [id, profile] of Object.entries(this.data.profiles)) {
+
+        for (const [id, profile] of Object.entries(state.profiles)) {
             if (typeof profile.routeHash === 'string' &&
                 profile.routeHash.length === hashed.length &&
                 timingSafeEqual(Buffer.from(profile.routeHash), Buffer.from(hashed))) {
                 return id;
             }
         }
-        throw new Error('Notification route is unknown. Pair the webhook again.');
+        return null;
+    }
+
+    resolveRoute(routeId) {
+        const id = this._findRoute(this.data, routeId);
+        if (!id) {
+            throw new Error('Notification route is unknown. Pair the webhook again.');
+        }
+
+        return id;
+    }
+
+    connectionRoute(connectionId) {
+        if (typeof connectionId !== 'string' || !/^[a-f0-9]{64}$/.test(connectionId)) {
+            throw new Error('Invalid dedicated Worker connection identifier.');
+        }
+
+        return createHmac('sha256', this.secret).update('notification-connection:' + connectionId).digest('hex');
+    }
+
+    connectionStatus(connectionId) {
+        const routeId = this.connectionRoute(connectionId);
+        const id = this._findRoute(this.data, routeId);
+        const profile = id && this.profileFor(id);
+
+        if (!profile?.webhook || profile.preference !== 'on') {
+            return { enabled: false };
+        }
+
+        return { enabled: true, notificationRouteId: routeId };
+    }
+
+    async configureConnection(connectionId, webhook) {
+        const routeId = this.connectionRoute(connectionId);
+        await this.change((state) => {
+            const id = this._findRoute(state, routeId) ?? randomUUID();
+            state.profiles[id] = this._profile(routeId, { name: '助理', webhook });
+        });
+
+        return this.connectionStatus(connectionId);
+    }
+
+    _profile(routeId, settings) {
+        return {
+            name: settings.name,
+            routeHash: this._routeHash(routeId),
+            tokenHash: null,
+            preference: settings.webhook ? 'on' : 'off',
+            webhook: settings.webhook ?? null,
+            enabledAt: settings.webhook ? (settings.enabledAt ?? new Date().toISOString()) : null,
+        };
     }
 
     _receiptHash(setupId) {
@@ -199,16 +250,8 @@ export class NotificationStore {
     async createRoute(settings) {
         const routeId = randomBytes(32).toString('hex');
         const profileId = randomUUID();
-        const routeHash = this._routeHash(routeId);
         await this.change((state) => {
-            state.profiles[profileId] = {
-                name: settings.name,
-                routeHash,
-                tokenHash: null,
-                preference: settings.webhook ? 'on' : 'off',
-                webhook: settings.webhook ?? null,
-                enabledAt: settings.webhook ? (settings.enabledAt ?? new Date().toISOString()) : null,
-            };
+            state.profiles[profileId] = this._profile(routeId, settings);
 
             this._savePairingReceipt(state, settings, routeId);
 

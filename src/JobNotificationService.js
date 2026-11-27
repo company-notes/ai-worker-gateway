@@ -247,6 +247,35 @@ export class JobNotificationService {
             'p{color:#424b56}code{overflow-wrap:anywhere}</style></head><body>' + content + '</body></html>';
     }
 
+    async _verifyWebhook(webhook) {
+        await this.sender.deliver(webhook, {
+            schema: 'ai-worker-gateway.webhook.v1',
+            deliveryId: 'test-' + randomBytes(12).toString('hex'),
+            event: 'work.webhook_test', assistant: '助理',
+            task: '通知連線測試', jobId: null, state: 'test',
+            occurredAt: new Date().toISOString(),
+            message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
+        });
+    }
+
+    connectionStatus(connectionId) {
+        return this.store.connectionStatus(connectionId);
+    }
+
+    async configureConnection(connectionId, settings) {
+        if (!this.store.active) {
+            throw new WebhookError('Gateway 尚未啟用通知儲存。');
+        }
+
+        this.store.connectionRoute(connectionId);
+        const webhook = validateWebhook(settings);
+
+        return this._serialize(async () => {
+            await this._verifyWebhook(webhook);
+            return this.store.configureConnection(connectionId, webhook);
+        });
+    }
+
     async submitSetup(nonce, fields) {
         const ticket = this._ticket(nonce);
         if (ticket.notificationRouteId) {
@@ -263,14 +292,7 @@ export class JobNotificationService {
         ticket.saving = true;
 
         try {
-            await this.sender.deliver(webhook, {
-                schema: 'ai-worker-gateway.webhook.v1',
-                deliveryId: 'test-' + randomBytes(12).toString('hex'),
-                event: 'work.webhook_test', assistant: '助理',
-                task: '通知連線測試', jobId: null, state: 'test',
-                occurredAt: new Date().toISOString(),
-                message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
-            });
+            await this._verifyWebhook(webhook);
 
             await this._serialize(() => this._savePairing(ticket, webhook));
         } finally {
