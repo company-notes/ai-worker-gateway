@@ -86,6 +86,7 @@ after(async () => {
 
 test('webhook setup pairs to an opaque route handle, without issuing a different MCP credential', async () => {
     const first = await rpc('work_start', { task: 'Sage first task', requestId: 'sage-first' });
+
     const setup = await rpc('worker_notification_setup', { notificationSetupToken: first.result.structuredContent.notificationSetupToken });
     assert.equal(setup.result.isError, false);
     const url = setup.result.structuredContent.url;
@@ -116,6 +117,7 @@ test('webhook setup pairs to an opaque route handle, without issuing a different
 
 test('two assistants use one MCP connection but dispatch to different notification destinations', async () => {
     const first = await rpc('work_start', { task: 'Noodle first task', requestId: 'noodle-first' });
+
     const setup = await rpc('worker_notification_setup', { notificationSetupToken: first.result.structuredContent.notificationSetupToken });
     const sent = await fetch(setup.result.structuredContent.url, {
         method: 'POST', headers: {

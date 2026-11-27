@@ -152,7 +152,6 @@ export class JobNotificationService {
         this._prune(this.attachments, now);
 
         const attachment = this._attachment(notificationSetupToken);
-
         if (this.tickets.size >= 50) {
             throw new Error('Too many unused webhook pairing links.');
         }
@@ -288,11 +287,13 @@ export class JobNotificationService {
         const token = ticket.notificationSetupToken;
         const attachment = this._attachment(token);
         const job = (await this.upstream.callTool('work_status', { jobId: attachment.jobId })).structuredContent;
+
         if (!job || job.jobId !== attachment.jobId) {
             throw new Error('The originally dispatched Job could not be verified.');
         }
 
         let initial = null;
+
         if (notifyingStates.has(job.state) && job.waitingOnDelegatedWork !== true) {
             const event = (job.recentEvents ?? []).filter((item) =>
                 item.jobId === job.jobId && this._isNotificationEvent(item) &&
@@ -321,11 +322,13 @@ export class JobNotificationService {
 
     describeBinding(response) {
         const jobId = response?.structuredContent?.job?.jobId;
+
         if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || response.isError === true) {
             return response;
         }
 
         const notificationBound = this._isBound(jobId);
+
         return {
             ...response,
             structuredContent: { ...response.structuredContent, notificationBound },

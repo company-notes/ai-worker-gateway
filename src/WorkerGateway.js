@@ -261,6 +261,7 @@ export class WorkerGateway {
         if (workStartTool) {
             workStartTool.description += ' Save the returned private notificationSetupToken and jobId before asking about notifications. A setup without this token is rejected. Verify notificationBound before promising callbacks.';
         }
+
         if (workStartTool?.outputSchema?.properties) {
             workStartTool.outputSchema.properties.notificationSetupToken = {
                 type: 'string', pattern: '^[a-f0-9]{64}$',

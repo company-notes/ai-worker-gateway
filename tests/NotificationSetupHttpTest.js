@@ -307,9 +307,11 @@ test('missing first Job token cannot create a misleading receiver-only pairing',
         const started = await isolated.rpc('work_start', { task: 'Build a habit tracker', requestId: 'habit-first' });
         const { job, notificationSetupToken, notificationBound } = started.body.result.structuredContent;
         assert.equal(notificationBound, false);
+
         const missing = await isolated.rpc('worker_notification_setup', {});
         assert.equal(missing.body.result.isError, true, 'An omitted Job token must fail before a form can be issued.');
         assert.equal(isolated.callbacks.length, 0);
+
         const unbound = await isolated.rpc('work_continue', {
             jobId: job.jobId, message: 'Refine existing requirements', requestId: 'habit-unbound-followup',
         });
@@ -317,6 +319,7 @@ test('missing first Job token cannot create a misleading receiver-only pairing',
 
         const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
         assert.equal(setup.body.result.structuredContent.jobId, job.jobId);
+
         await isolated.authorize(setup.body.result.structuredContent.url);
         const paired = await isolated.rpc('worker_notification_pairing_status', { setupId: setup.body.result.structuredContent.setupId });
         assert.equal(paired.body.result.structuredContent.jobId, job.jobId);
@@ -348,6 +351,7 @@ test('a paired Job receives an idle-to-idle Fleet turn_finished event without du
         await isolated.finish(job.jobId);
 
         await isolated.finish(job.jobId, { type: 'turn_finished', fromState: 'idle' });
+
         assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
             ['work.webhook_test', 'work.turn_finished', 'work.turn_finished'],
             'Fleet can report a full turn completed between its own idle polls.');
