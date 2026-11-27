@@ -411,3 +411,64 @@ test('an assistant reading only the first text block can pair the original Job a
         await isolated.close();
     }
 });
+
+class ConnectionNotificationScenario extends NotificationScenario {
+    async connection(connectionId, webhook, token = NotificationScenario.clientToken, origin) {
+        const response = await fetch(this.address + '/notifications/connection', {
+            method: 'POST',
+            headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json',
+                ...(origin ? { origin } : {}) },
+            body: JSON.stringify({ connectionId, ...(webhook ? { webhook } : {}) }),
+        });
+
+        return { status: response.status, data: await response.json() };
+    }
+}
+
+test('local owner configures connection notifications before any Job and the dedicated route survives restart', async () => {
+    const isolated = new ConnectionNotificationScenario();
+    const connectionId = 'a'.repeat(64);
+    const otherConnectionId = 'b'.repeat(64);
+    const webhook = { url: null, header: 'Authorization', secret: 'Authorization: Bearer owner-connection-key' };
+
+    try {
+        await isolated.start();
+        webhook.url = isolated.webhookURL;
+
+        assert.equal((await isolated.connection(connectionId, webhook, 'wrong-key')).status, 401);
+        assert.equal((await isolated.connection(connectionId, webhook, NotificationScenario.clientToken,
+            'https://untrusted.example')).status, 403);
+        assert.equal(isolated.callbacks.length, 0);
+
+        const configured = await isolated.connection(connectionId, webhook);
+        assert.equal(configured.status, 200, 'The owner must be able to configure notification before dispatching any Job.');
+        assert.equal(configured.data.enabled, true);
+        assert.match(configured.data.notificationRouteId, /^[a-f0-9]{64}$/);
+        assert.equal(isolated.dispatches.length, 0);
+        assert.equal(isolated.callbacks[0].event.event, 'work.webhook_test');
+
+        await isolated.restartGateway();
+        const saved = await isolated.connection(connectionId);
+        assert.equal(saved.data.notificationRouteId, configured.data.notificationRouteId);
+        assert.equal((await isolated.connection(otherConnectionId)).data.enabled, false);
+
+        const other = await isolated.connection(otherConnectionId, {
+            ...webhook, secret: 'other-connection-key',
+        });
+        assert.notEqual(other.data.notificationRouteId, saved.data.notificationRouteId);
+
+        for (const route of [saved.data.notificationRouteId, other.data.notificationRouteId]) {
+            const started = await isolated.rpc('work_start', {
+                task: 'Build a walking tracker', requestId: 'connection-' + route.slice(0, 8), notificationRouteId: route,
+            });
+            assert.equal(started.body.result.structuredContent.notificationBound, true);
+            await isolated.finish(started.body.result.structuredContent.job.jobId);
+        }
+
+        assert.deepEqual(isolated.callbacks.filter((item) => item.event.event === 'work.turn_finished')
+            .map((item) => item.authorization), ['Bearer owner-connection-key', 'Bearer other-connection-key']);
+        assert.equal(isolated.dispatches.length, 2);
+    } finally {
+        await isolated.close();
+    }
+});
