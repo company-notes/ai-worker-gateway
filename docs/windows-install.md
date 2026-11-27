@@ -119,6 +119,6 @@ Skill 是路由決策程序，不是授權或執行器。
 
 自然語言驗收詳見 agent-zero-context-test.md。
 
-## Dedicated Nuwa Studio connection notifications
+## Nuwa Studio assistant notifications
 
-The combined Studio owner authorization page configures the native webhook before the first Job. Studio authenticates to the local Gateway using the installed DPAPI-backed credential; its local-only GET/PUT connection notification endpoint is not an MCP tool. The encrypted Gateway store derives a distinct route for each dedicated OAuth connection identifier. Studio inserts that route for new dispatch and checks that continuation belongs to the same route; private routing metadata is removed before Fleet. The ordinary 3791 key is still shared transport authorization, not a bot identity. Never select one bot's webhook as the default for a shared OAuth grant. Existing direct or shared clients with verified private routes retain them. Old unbound Jobs are not reassigned. See the canonical Session Router Skill for the current assistant workflow.
+The combined local owner authorization page registers each assistant's own Bot ID (platform-qualified) or canonical Agent Address and webhook before dispatch. Studio uses its authorized Worker connection as the registry scope and resolves the required assistantIdentity to a private route. Gateway validates the route, encrypts settings, binds Jobs and checks continuation ownership. Agent Address clients without webhook support can explicitly register for manual status checks. Shared OAuth connections do not authenticate individual Bots; only trusted assistants may share a connection. No remote MCP tool can overwrite a local webhook. Existing direct Gateway clients retain their explicit private routing capability. See Session Router for the current flow.
