@@ -361,3 +361,49 @@ test('a paired Job receives an idle-to-idle Fleet turn_finished event without du
         await isolated.close();
     }
 });
+
+test('an assistant reading only the first text block can pair the original Job and receive completion', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const status = await isolated.rpc('worker_notification_status');
+        assert.equal(JSON.parse(status.body.result.content[0].text).preference, 'unset');
+
+        const started = await isolated.rpc('work_start', {
+            task: 'Build a daily horoscope tool', requestId: 'visible-dispatch',
+        });
+        const result = started.body.result;
+        const first = JSON.parse(result.content[0].text);
+        assert.equal(first.job.jobId, result.structuredContent.job.jobId);
+        assert.equal(first.notificationBound, false);
+        assert.match(first.notificationSetupToken ?? '', /^[a-f0-9]{64}$/,
+            'The first text block must contain the private token, even without structuredContent.');
+        assert.equal(first.notificationSetupToken, result.structuredContent.notificationSetupToken);
+
+        const setup = await isolated.rpc('worker_notification_setup', {
+            notificationSetupToken: first.notificationSetupToken,
+        });
+        const { url, setupId } = JSON.parse(setup.body.result.content[0].text);
+        await isolated.authorize(url);
+
+        const paired = await isolated.rpc('worker_notification_pairing_status', { setupId });
+        const receipt = JSON.parse(paired.body.result.content[0].text);
+        assert.equal(receipt.jobId, first.job.jobId);
+        assert.equal(receipt.notificationBound, true);
+
+        await isolated.finish(first.job.jobId);
+        const continued = await isolated.rpc('work_continue', {
+            jobId: first.job.jobId, message: 'Add a daily guide', requestId: 'visible-continue',
+        });
+        const followup = JSON.parse(continued.body.result.content[0].text);
+        assert.equal(followup.job.jobId, first.job.jobId);
+        assert.equal(followup.notificationBound, true);
+
+        await isolated.finish(first.job.jobId);
+        assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
+            ['work.webhook_test', 'work.turn_finished', 'work.turn_finished']);
+    } finally {
+        await isolated.close();
+    }
+});
