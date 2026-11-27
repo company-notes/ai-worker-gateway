@@ -414,11 +414,11 @@ test('an assistant reading only the first text block can pair the original Job a
 
 class ConnectionNotificationScenario extends NotificationScenario {
     async connection(connectionId, webhook, token = NotificationScenario.clientToken, origin) {
-        const response = await fetch(this.address + '/notifications/connection', {
-            method: 'POST',
+        const response = await fetch(this.address + '/notifications/connections/' + connectionId, {
+            method: webhook ? 'PUT' : 'GET',
             headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json',
                 ...(origin ? { origin } : {}) },
-            body: JSON.stringify({ connectionId, ...(webhook ? { webhook } : {}) }),
+            ...(webhook ? { body: JSON.stringify(webhook) } : {}),
         });
 
         return { status: response.status, data: await response.json() };
@@ -436,8 +436,6 @@ test('local owner configures connection notifications before any Job and the ded
         webhook.url = isolated.webhookURL;
 
         assert.equal((await isolated.connection(connectionId, webhook, 'wrong-key')).status, 401);
-        assert.equal((await isolated.connection(connectionId, webhook, NotificationScenario.clientToken,
-            'https://untrusted.example')).status, 403);
         assert.equal(isolated.callbacks.length, 0);
 
         const configured = await isolated.connection(connectionId, webhook);
@@ -446,6 +444,9 @@ test('local owner configures connection notifications before any Job and the ded
         assert.match(configured.data.notificationRouteId, /^[a-f0-9]{64}$/);
         assert.equal(isolated.dispatches.length, 0);
         assert.equal(isolated.callbacks[0].event.event, 'work.webhook_test');
+        assert.equal((await isolated.connection(connectionId, webhook, NotificationScenario.clientToken,
+            'https://untrusted.example')).status, 403);
+        assert.equal(isolated.callbacks.length, 1);
 
         await isolated.restartGateway();
         const saved = await isolated.connection(connectionId);
