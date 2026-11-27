@@ -241,8 +241,14 @@ test('an owner can authorize now and the assistant can claim the route after lin
         await isolated.start();
         const setup = await isolated.rpc('worker_notification_setup');
         const { url, setupId } = setup.body.result.structuredContent;
+        const browserNonce = new URL(url).pathname.split('/').at(-1);
+        assert.notEqual(browserNonce, setupId, 'The public browser URL cannot be the private claim credential.');
         await isolated.authorize(url);
         assert.equal(isolated.callbacks.length, 1, 'The owner received the real webhook test.');
+
+        const denied = await isolated.rpc('worker_notification_pairing_status', { setupId: browserNonce });
+        assert.equal(denied.body.result.isError, true);
+        assert.equal((await isolated.rpc('worker_notification_pairing_status', { setupId }, 'wrong-key')).status, 401);
 
         context.mock.timers.enable({ apis: ['Date'], now: Date.now() });
         context.mock.timers.tick(11 * 60_000);

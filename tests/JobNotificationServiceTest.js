@@ -48,11 +48,11 @@ async function fixture() {
     });
     const pair = async (name, key) => {
         const setup = service.setup(3791);
-        const nonce = setup.setupId;
-        assert.equal(service.pairingStatus(nonce).paired, false);
+        const nonce = new URL(setup.url).pathname.split('/').at(-1);
+        assert.equal(service.pairingStatus(setup.setupId).paired, false);
         const confirmation = await service.submitSetup(nonce, form(name, key));
         assert.match(confirmation, /Webhook 配對成功/);
-        const result = service.pairingStatus(nonce);
+        const result = service.pairingStatus(setup.setupId);
         assert.equal(result.paired, true);
         assert.match(result.notificationRouteId, /^[a-f0-9]{64}$/);
         return result.notificationRouteId;
