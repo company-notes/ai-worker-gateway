@@ -375,6 +375,7 @@ test('an assistant reading only the first text block can pair the original Job a
         });
         const result = started.body.result;
         const first = JSON.parse(result.content[0].text);
+
         assert.equal(first.job.jobId, result.structuredContent.job.jobId);
         assert.equal(first.notificationBound, false);
         assert.match(first.notificationSetupToken ?? '', /^[a-f0-9]{64}$/,
@@ -389,6 +390,7 @@ test('an assistant reading only the first text block can pair the original Job a
 
         const paired = await isolated.rpc('worker_notification_pairing_status', { setupId });
         const receipt = JSON.parse(paired.body.result.content[0].text);
+
         assert.equal(receipt.jobId, first.job.jobId);
         assert.equal(receipt.notificationBound, true);
 
@@ -397,10 +399,12 @@ test('an assistant reading only the first text block can pair the original Job a
             jobId: first.job.jobId, message: 'Add a daily guide', requestId: 'visible-continue',
         });
         const followup = JSON.parse(continued.body.result.content[0].text);
+
         assert.equal(followup.job.jobId, first.job.jobId);
         assert.equal(followup.notificationBound, true);
 
         await isolated.finish(first.job.jobId);
+
         assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
             ['work.webhook_test', 'work.turn_finished', 'work.turn_finished']);
     } finally {
