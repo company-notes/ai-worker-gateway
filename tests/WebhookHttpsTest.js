@@ -60,3 +60,34 @@ test('production DNS validation still refuses a private address for a public HTT
     await assert.rejects(sender.deliver({ url: 'https://webhook.test/callback',
         header: 'Authorization', secret: 'disposable-test-key' }, { deliveryId: 'test-private' }), /私人網路/);
 });
+
+test('public HTTPS receiver DNS accepts ordinary IPv4 and IPv6, including dual-stack hosts', async () => {
+    const url = new URL('https://webhook.test/callback');
+    const ipv4 = { address: '104.21.1.1', family: 4 };
+    const ipv6 = { address: '2606:4700::1', family: 6 };
+
+    for (const entries of [[ipv4], [ipv6], [ipv4, ipv6], [ipv6, ipv4]]) {
+        const sender = new WebhookSender({ resolve: async () => entries });
+        assert.deepEqual(await sender._resolveAddress(url), entries[0]);
+    }
+});
+
+test('mixed public and forbidden DNS results cannot bypass the receiver address policy', async () => {
+    const url = new URL('https://webhook.test/callback');
+    const publicAddress = { address: '104.21.1.1', family: 4 };
+
+    for (const forbidden of [
+        { address: '127.0.0.1', family: 4 },
+        { address: '10.0.0.1', family: 4 },
+        { address: '192.168.1.1', family: 4 },
+        { address: '100.64.0.1', family: 4 },
+        { address: '198.18.0.1', family: 4 },
+        { address: '::1', family: 6 },
+        { address: 'fc00::1', family: 6 },
+        { address: '::ffff:104.21.1.1', family: 6 },
+        { address: '::ffff:127.0.0.1', family: 6 },
+    ]) {
+        const sender = new WebhookSender({ resolve: async () => [publicAddress, forbidden] });
+        await assert.rejects(sender._resolveAddress(url), /私人網路/);
+    }
+});
