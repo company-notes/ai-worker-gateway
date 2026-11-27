@@ -119,14 +119,23 @@ export class NotificationScenario {
             response.writeHead(200, { 'content-type': 'application/json' });
             response.end(JSON.stringify({ jsonrpc: '2.0', id: input.id, result }));
         });
-        const upstreamURL = await this._listen(this.fleet) + '/mcp';
+        this.upstreamURL = await this._listen(this.fleet) + '/mcp';
 
+        await this._startGateway();
+    }
+
+    async restartGateway() {
+        await this.gateway.close();
+        await this._startGateway();
+    }
+
+    async _startGateway() {
         this.gateway = new WorkerGateway(WorkerConfig.fromEnvironment({
             AWG_CLIENT_TOKEN: NotificationScenario.clientToken,
             AWG_UPSTREAM_TOKEN: NotificationScenario.upstreamToken,
             AWG_NOTIFICATION_STORAGE_KEY: 'stable-notification-key-abcdefghijklmnopqrstuvwxyz',
             AWG_NOTIFICATION_STATE_DIR: this.folder,
-            AWG_UPSTREAM_MCP_URL: upstreamURL,
+            AWG_UPSTREAM_MCP_URL: this.upstreamURL,
             AWG_LISTEN_PORT: '0',
         }));
         await this.gateway.listen();

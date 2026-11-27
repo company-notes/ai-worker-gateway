@@ -56,7 +56,7 @@ export class JobNotificationService {
             },
             {
                 name: 'worker_notification_pairing_status',
-                description: 'Check a pending setupId after the user has submitted the local form. On successful webhook test, returns one opaque notificationRouteId for THIS assistant to include in future work_start / worker_task_start calls.',
+                description: 'Check the private setupId saved before presenting the authorization link. Before every later dispatch, recover any pending pairing using this tool. A successful authorization receipt remains claimable for 30 days, even after link expiry or Gateway restart. Save the returned notificationRouteId privately and verify worker_notification_status before use.',
                 inputSchema: {
                     type: 'object', properties: {
                         setupId: { type: 'string', pattern: '^[A-Za-z0-9_-]{32}$' },
@@ -142,6 +142,7 @@ export class JobNotificationService {
         }
 
         const nonce = randomBytes(24).toString('base64url');
+        const setupId = randomBytes(24).toString('base64url');
         const now = Date.now();
         this._prune(this.tickets, now);
         this._prune(this.attachments, now);
@@ -152,27 +153,34 @@ export class JobNotificationService {
         if (this.tickets.size >= 50) {
             throw new Error('Too many unused webhook pairing links.');
         }
-        this.tickets.set(nonce, { expiresAt: now + setupTtlMs, notificationRouteId: null, notificationSetupToken, jobId: null, saving: false });
+        this.tickets.set(nonce, { expiresAt: now + setupTtlMs, setupId, notificationRouteId: null, notificationSetupToken, saving: false });
 
         return {
             url: 'http://127.0.0.1:' + port + '/notifications/setup/' + nonce,
-            setupId: nonce,
+            setupId,
             label: '設定完成通知',
-            instruction: 'The user fills the URL and key in the local form. After successful pairing, call worker_notification_pairing_status with setupId to obtain a private reusable route handle. All assistants keep their existing shared MCP connection key.',
+            instruction: 'Save setupId privately BEFORE showing the browser URL. Never display setupId. After the user authorizes, or before any later dispatch, call worker_notification_pairing_status with the saved setupId; a successful receipt can be retrieved for 30 days after authorization, even after a restart. Save the returned route, verify status, then include it in new work. Do not repeat setup merely because the browser URL expired.',
             validForMinutes: 10,
         };
     }
 
     pairingStatus(setupId) {
-        const ticket = this._ticket(setupId);
-        if (!ticket.notificationRouteId) {
-            return { paired: false, detail: 'Webhook form not yet submitted successfully.' };
+        const receipt = this.store.pairingReceipt(setupId);
+
+        if (receipt) {
+            return {
+                paired: true, ...receipt,
+                detail: 'Save the route in private assistant configuration, verify worker_notification_status, then use it for every new task. Clear the pending setupId only after saving and verification. Do not show either identifier to the user.',
+            };
         }
-        return {
-            paired: true, ...(ticket.jobId ? { jobId: ticket.jobId } : {}),
-            notificationRouteId: ticket.notificationRouteId,
-            detail: 'Save this route handle in private assistant configuration; include it with every future new task. Do not show it to the user.',
-        };
+
+        const ticket = [...this.tickets.values()].find((entry) => entry.setupId === setupId);
+
+        if (!ticket || ticket.expiresAt <= Date.now()) {
+            throw new Error('No successful pairing receipt is available for this identifier. If authorization was not completed, request a new link.');
+        }
+
+        return { paired: false, detail: 'Webhook form not yet submitted successfully.' };
     }
 
     _ticket(nonce) {
@@ -268,7 +276,7 @@ export class JobNotificationService {
         }
 
         return this._page('通知設定成功', '<h1>Webhook 配對成功</h1>' +
-            '<p>請回到助理。助理會完成配對確認並在後續派工時自動使用這條通知路線。</p>' +
+            '<p>請回到助理告知已完成設定。助理會確認通知狀態，成功授權的結果可在 30 天內領取，不受原設定連結有效期限限制。</p>' +
             '<p>原有 MCP 連線及其共用金鑰都不需要改動。</p>');
     }
 
@@ -297,9 +305,8 @@ export class JobNotificationService {
         }
 
         ticket.notificationRouteId = await this.store.createRoute({
-            name: '助理', webhook, enabledAt, jobId: attachment?.jobId, initial,
+            name: '助理', webhook, enabledAt, jobId: attachment?.jobId, initial, setupId: ticket.setupId,
         });
-        ticket.jobId = attachment?.jobId ?? null;
 
         if (attachment) {
             this.attachments.delete(token);

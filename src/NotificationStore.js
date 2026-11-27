@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 const version = 1;
+const pairingReceiptTtlMs = 30 * 24 * 60 * 60_000;
 
 export class NotificationStore {
     constructor(config) {
@@ -13,7 +14,7 @@ export class NotificationStore {
         this.data = {
             version, cursor: '0', profiles: {
                 default: { name: '預設助理', tokenHash: null, preference: 'unset', webhook: null, enabledAt: null },
-            }, jobs: {}, pending: [], initialCursors: {},
+            }, jobs: {}, pending: [], initialCursors: {}, pairingReceipts: {},
         };
         this.writer = Promise.resolve();
     }
@@ -150,6 +151,51 @@ export class NotificationStore {
         throw new Error('Notification route is unknown. Pair the webhook again.');
     }
 
+    _receiptHash(setupId) {
+        if (typeof setupId !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(setupId)) {
+            throw new Error('Invalid notification pairing identifier.');
+        }
+
+        return createHmac('sha256', this.secret).update('notification-receipt:' + setupId).digest('hex');
+    }
+
+    pairingReceipt(setupId) {
+        const receipt = this.data.pairingReceipts?.[this._receiptHash(setupId)];
+
+        if (!receipt || receipt.expiresAt <= Date.now()) {
+            return null;
+        }
+
+        return { notificationRouteId: receipt.notificationRouteId, ...(receipt.jobId ? { jobId: receipt.jobId } : {}) };
+    }
+
+    _savePairingReceipt(state, settings, routeId) {
+        const now = Date.now();
+        state.pairingReceipts ??= {};
+
+        for (const [hash, receipt] of Object.entries(state.pairingReceipts)) {
+            if (receipt.expiresAt <= now) {
+                delete state.pairingReceipts[hash];
+            }
+        }
+
+        if (settings.setupId === undefined) {
+            return;
+        }
+
+        const hash = this._receiptHash(settings.setupId);
+        if (state.pairingReceipts[hash]) {
+            throw new Error('Notification pairing already completed.');
+        }
+        if (Object.keys(state.pairingReceipts).length >= 5000) {
+            throw new Error('Notification pairing receipt capacity reached.');
+        }
+
+        state.pairingReceipts[hash] = {
+            notificationRouteId: routeId, jobId: settings.jobId ?? null, expiresAt: now + pairingReceiptTtlMs,
+        };
+    }
+
     async createRoute(settings) {
         const routeId = randomBytes(32).toString('hex');
         const profileId = randomUUID();
@@ -163,6 +209,8 @@ export class NotificationStore {
                 webhook: settings.webhook ?? null,
                 enabledAt: settings.webhook ? (settings.enabledAt ?? new Date().toISOString()) : null,
             };
+
+            this._savePairingReceipt(state, settings, routeId);
 
             if (settings.jobId) {
                 if (state.jobs[settings.jobId]) {

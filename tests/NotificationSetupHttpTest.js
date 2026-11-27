@@ -233,3 +233,59 @@ test('owner can retry a rejected key on the same page and paste the complete Rak
         await isolated.close();
     }
 });
+
+test('an owner can authorize now and the assistant can claim the route after link expiry and Gateway restart', async (context) => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const setup = await isolated.rpc('worker_notification_setup');
+        const { url, setupId } = setup.body.result.structuredContent;
+        const browserNonce = new URL(url).pathname.split('/').at(-1);
+
+        assert.notEqual(browserNonce, setupId, 'The public browser URL cannot be the private claim credential.');
+
+        await isolated.authorize(url);
+        assert.equal(isolated.callbacks.length, 1, 'The owner received the real webhook test.');
+
+        const denied = await isolated.rpc('worker_notification_pairing_status', { setupId: browserNonce });
+        assert.equal(denied.body.result.isError, true);
+        assert.equal((await isolated.rpc('worker_notification_pairing_status', { setupId }, 'wrong-key')).status, 401);
+
+        context.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+        context.mock.timers.tick(11 * 60_000);
+        assert.notEqual((await fetch(url)).status, 200, 'Expired browser authorization must remain expired.');
+
+        const late = await isolated.rpc('worker_notification_pairing_status', { setupId });
+        assert.equal(late.body.result.structuredContent?.paired, true,
+            'A successful authorization must remain claimable after its browser link expires.');
+        const route = late.body.result.structuredContent.notificationRouteId;
+
+        await isolated.restartGateway();
+        const recovered = await isolated.rpc('worker_notification_pairing_status', { setupId });
+        assert.equal(recovered.body.result.structuredContent?.notificationRouteId, route,
+            'A Gateway restart must preserve the same private route without another authorization.');
+        assert.equal((await isolated.rpc('worker_notification_status', {
+            notificationRouteId: route,
+        })).body.result.structuredContent.enabled, true);
+
+        const started = await isolated.rpc('work_start', {
+            task: 'Build a subscription tracker', requestId: 'delayed-pairing-start', notificationRouteId: route,
+        });
+        const jobID = started.body.result.structuredContent.job.jobId;
+        await isolated.finish(jobID);
+
+        const continued = await isolated.rpc('work_continue', {
+            jobId: jobID, message: 'Add annual totals', requestId: 'delayed-pairing-continue',
+        });
+        assert.equal(continued.body.result.structuredContent.job.jobId, jobID);
+
+        await isolated.finish(jobID);
+        assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
+            ['work.webhook_test', 'work.turn_finished', 'work.turn_finished']);
+        assert.ok(isolated.callbacks.slice(1).every((item) => item.event.jobId === jobID));
+    } finally {
+        context.mock.timers.reset();
+        await isolated.close();
+    }
+});
