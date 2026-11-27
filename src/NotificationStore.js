@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { AssistantIdentity } from './AssistantIdentity.js';
 
 const version = 1;
 const pairingReceiptTtlMs = 30 * 24 * 60 * 60_000;
@@ -139,16 +140,70 @@ export class NotificationStore {
         return createHmac('sha256', this.secret).update('notification-route:' + routeId).digest('hex');
     }
 
-    resolveRoute(routeId) {
+    _findRoute(state, routeId) {
         const hashed = this._routeHash(routeId);
-        for (const [id, profile] of Object.entries(this.data.profiles)) {
+
+        for (const [id, profile] of Object.entries(state.profiles)) {
             if (typeof profile.routeHash === 'string' &&
                 profile.routeHash.length === hashed.length &&
                 timingSafeEqual(Buffer.from(profile.routeHash), Buffer.from(hashed))) {
                 return id;
             }
         }
-        throw new Error('Notification route is unknown. Pair the webhook again.');
+
+        return null;
+    }
+
+    resolveRoute(routeId) {
+        const id = this._findRoute(this.data, routeId);
+        if (!id) {
+            throw new Error('Notification route is unknown. Pair the webhook again.');
+        }
+
+        return id;
+    }
+
+    assistantRoute(connectionId, identity) {
+        const key = AssistantIdentity.scopedKey(connectionId, identity);
+
+        return createHmac('sha256', this.secret).update('notification-assistant:' + key).digest('hex');
+    }
+
+    assistantStatus(connectionId, identity) {
+        const routeId = this.assistantRoute(connectionId, identity);
+        const id = this._findRoute(this.data, routeId);
+        const profile = id && this.profileFor(id);
+
+        if (!profile) {
+            return { registered: false, enabled: false };
+        }
+
+        return { registered: true, enabled: profile.preference === 'on' && !!profile.webhook,
+            notificationRouteId: routeId };
+    }
+
+    async configureAssistant(connectionId, identity, webhook) {
+        const routeId = this.assistantRoute(connectionId, identity);
+
+        await this.change((state) => {
+            const id = this._findRoute(state, routeId) ?? randomUUID();
+            const profile = this._profile(routeId, { name: '助理', webhook });
+            profile.manual = webhook === null;
+            state.profiles[id] = profile;
+        });
+
+        return this.assistantStatus(connectionId, identity);
+    }
+
+    _profile(routeId, settings) {
+        return {
+            name: settings.name,
+            routeHash: this._routeHash(routeId),
+            tokenHash: null,
+            preference: settings.webhook ? 'on' : 'off',
+            webhook: settings.webhook ?? null,
+            enabledAt: settings.webhook ? (settings.enabledAt ?? new Date().toISOString()) : null,
+        };
     }
 
     _receiptHash(setupId) {
@@ -199,16 +254,8 @@ export class NotificationStore {
     async createRoute(settings) {
         const routeId = randomBytes(32).toString('hex');
         const profileId = randomUUID();
-        const routeHash = this._routeHash(routeId);
         await this.change((state) => {
-            state.profiles[profileId] = {
-                name: settings.name,
-                routeHash,
-                tokenHash: null,
-                preference: settings.webhook ? 'on' : 'off',
-                webhook: settings.webhook ?? null,
-                enabledAt: settings.webhook ? (settings.enabledAt ?? new Date().toISOString()) : null,
-            };
+            state.profiles[profileId] = this._profile(routeId, settings);
 
             this._savePairingReceipt(state, settings, routeId);
 

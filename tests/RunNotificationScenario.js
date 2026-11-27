@@ -12,6 +12,10 @@ try {
     for await (const line of commands) {
         const command = JSON.parse(line);
 
+        if (Object.hasOwn(command, 'receiverAuthorization')) {
+            scenario.receiverAuthorization = command.receiverAuthorization;
+        }
+
         if (command.jobId) {
             await scenario.finish(command.jobId);
         }

@@ -80,7 +80,7 @@ export class JobNotificationService {
         }
         const id = this.store.resolveRoute(routeId);
         const profile = this.store.profileFor(id);
-        if (profile.preference !== 'on' || !profile.webhook) {
+        if (profile.manual !== true && (profile.preference !== 'on' || !profile.webhook)) {
             throw new Error('Notification route is disabled. Cannot bind new work to it.');
         }
         return id;
@@ -247,6 +247,41 @@ export class JobNotificationService {
             'p{color:#424b56}code{overflow-wrap:anywhere}</style></head><body>' + content + '</body></html>';
     }
 
+    async _verifyWebhook(webhook) {
+        await this.sender.deliver(webhook, {
+            schema: 'ai-worker-gateway.webhook.v1',
+            deliveryId: 'test-' + randomBytes(12).toString('hex'),
+            event: 'work.webhook_test', assistant: '助理',
+            task: '通知連線測試', jobId: null, state: 'test',
+            occurredAt: new Date().toISOString(),
+            message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
+        });
+    }
+
+    assistantStatus(connectionId, identity) {
+        return this.store.assistantStatus(connectionId, identity);
+    }
+
+    async configureAssistant(connectionId, identity, settings) {
+        if (!this.store.active) {
+            throw new WebhookError('Gateway 尚未啟用通知儲存。');
+        }
+        if (settings === null && identity.type !== 'agentAddress') {
+            throw new WebhookError('Bot 必須設定 Webhook 通知接收端。');
+        }
+
+        this.store.assistantRoute(connectionId, identity);
+        const webhook = settings === null ? null : validateWebhook(settings);
+
+        return this._serialize(async () => {
+            if (webhook !== null) {
+                await this._verifyWebhook(webhook);
+            }
+
+            return this.store.configureAssistant(connectionId, identity, webhook);
+        });
+    }
+
     async submitSetup(nonce, fields) {
         const ticket = this._ticket(nonce);
         if (ticket.notificationRouteId) {
@@ -263,14 +298,7 @@ export class JobNotificationService {
         ticket.saving = true;
 
         try {
-            await this.sender.deliver(webhook, {
-                schema: 'ai-worker-gateway.webhook.v1',
-                deliveryId: 'test-' + randomBytes(12).toString('hex'),
-                event: 'work.webhook_test', assistant: '助理',
-                task: '通知連線測試', jobId: null, state: 'test',
-                occurredAt: new Date().toISOString(),
-                message: 'Webhook 配對測試成功，往後會收到此助理的工作進度通知。',
-            });
+            await this._verifyWebhook(webhook);
 
             await this._serialize(() => this._savePairing(ticket, webhook));
         } finally {
@@ -318,6 +346,14 @@ export class JobNotificationService {
 
         return !!profile?.webhook && profile.preference === 'on' &&
             (routeId === undefined || this.store.resolveRoute(routeId) === profileId);
+    }
+
+    verifyContinuation(routeId, jobId) {
+        const profileId = this.resolveRoute(routeId);
+
+        if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || this.store.data.jobs[jobId] !== profileId) {
+            throw new Error('This Job is not bound to the specified assistant. Use the original assistant identity.');
+        }
     }
 
     describeBinding(response) {

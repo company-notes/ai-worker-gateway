@@ -118,3 +118,7 @@ Skill 是路由決策程序，不是授權或執行器。
 這個初版腳本以「**已經有可用的原版 3790**」為前提；尚未做從全新電腦自動部署、配對及設定原版 Fleet 的完整流程、非 Git 執行工作區、第三方助理 Skills UI 自動啟用，或 Windows 登入前真正的 OS Service。**受控本機 T3 Git Project Provisioning 與本機 Fleet 內部 Operate Grant 自動配置已加入程式碼，仍須在真實 Windows + T3 + Fleet 實際驗收。完全乾淨的 Windows 電腦自動安裝原版 Fleet 尚未完成，不可宣稱一條指令可從只有 T3/Node 自動部署完整的 3790/3791。**Windows CI 覆蓋腳本解析、無副作用 PlanOnly、DPAPI，以及**實際 Node 監聽程序**的安全停止／拒絕停止無關程序；實機的排程服務生命週期、登入重啟與完整 T3 Job 流程仍需使用者測試機驗證。
 
 自然語言驗收詳見 agent-zero-context-test.md。
+
+## Nuwa Studio assistant notifications
+
+The combined local owner authorization page registers each assistant's own Bot ID (platform-qualified) or canonical Agent Address and webhook before dispatch. Studio uses its authorized Worker connection as the registry scope and resolves the required assistantIdentity to a private route. Gateway validates the route, encrypts settings, binds Jobs and checks continuation ownership. Agent Address clients without webhook support can explicitly register for manual status checks. Shared OAuth connections do not authenticate individual Bots; only trusted assistants may share a connection. No remote MCP tool can overwrite a local webhook. Existing direct Gateway clients retain their explicit private routing capability. See Session Router for the current flow.

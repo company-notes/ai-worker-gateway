@@ -6,6 +6,8 @@ import { TaskDispatchService } from './TaskDispatchService.js';
 import { WorkspaceProvisionService } from './WorkspaceProvisionService.js';
 import { DeliveryService } from './DeliveryService.js';
 import { JobNotificationService } from './JobNotificationService.js';
+import { AssistantIdentity } from './AssistantIdentity.js';
+import { WebhookError } from './WebhookSender.js';
 
 export class WorkerGateway {
     constructor(config, services = {}) {
@@ -46,17 +48,21 @@ export class WorkerGateway {
         return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
     }
 
-    async _readPayload(request) {
+    async _readJSON(request, limit = 1_048_576) {
         const chunks = [];
         let size = 0;
         for await (const chunk of request) {
             size += chunk.length;
-            if (size > 1_048_576) {
+            if (size > limit) {
                 throw new Error('Request exceeds maximum payload size');
             }
             chunks.push(chunk);
         }
-        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    }
+
+    async _readPayload(request) {
+        const payload = await this._readJSON(request);
         if (Array.isArray(payload) || payload === null || typeof payload !== 'object' || payload.jsonrpc !== '2.0') {
             throw new Error('Expected one JSON-RPC 2.0 request');
         }
@@ -200,9 +206,13 @@ export class WorkerGateway {
         const directContinue = payload.method === 'tools/call' && payload.params?.name === 'work_continue';
         let route;
         try {
-            route = directStart
+            route = directStart || directContinue
                 ? this._routeFromArguments(payload.params.arguments)
                 : { notificationRouteId: undefined, cleaned: null };
+
+            if (directContinue && route.notificationRouteId !== undefined) {
+                this.notifications.verifyContinuation(route.notificationRouteId, route.cleaned.jobId);
+            }
         } catch (error) {
             return {
                 status: 200,
@@ -210,7 +220,7 @@ export class WorkerGateway {
                 contentType: 'application/json',
             };
         }
-        const forwarded = directStart && route.notificationRouteId
+        const forwarded = (directStart || directContinue) && route.notificationRouteId
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
         const upstreamResponse = await this.upstream.forward(forwarded, protocolVersion);
@@ -234,7 +244,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. After a successful first dispatch privately save its jobId and notificationSetupToken BEFORE asking once whether the user wants callbacks; if yes, immediately create and verify the assistant\'s native webhook receiver in the same turn WITHOUT asking again, then call worker_notification_setup with the REQUIRED dispatch notificationSetupToken, privately SAVE setupId BEFORE showing the local webhook form. When the user returns, and BEFORE any later dispatch if setup is pending, call worker_notification_pairing_status with that saved setupId; successful receipts survive browser expiry and restart for 30 days. Confirm notificationBound=true and matching original jobId; privately save the returned notificationRouteId, verify worker_notification_status, and only then clear the pending setupId. Verify notificationBound on start and continuation responses before promising callbacks. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. Studio authorizes each assistant’s native webhook receiver locally before dispatch. Studio resolves the supplied assistant identity to the private route and Gateway checks continuation ownership. Direct Gateway connections and existing shared connections use verified private routing capabilities only, never an inferred identity from a common key. Follow the installed Session Router Skill and actual tool catalog. Verify notificationBound on each start and continuation before promising callbacks. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
@@ -259,7 +269,7 @@ export class WorkerGateway {
             };
         }
         if (workStartTool) {
-            workStartTool.description += ' Save the returned private notificationSetupToken and jobId before asking about notifications. A setup without this token is rejected. Verify notificationBound before promising callbacks.';
+            workStartTool.description += ' Verify notificationBound before promising callbacks. Follow the Session Router Skill and the actual notification tools exposed by your connection.';
         }
 
         if (workStartTool?.outputSchema?.properties) {
@@ -364,6 +374,64 @@ export class WorkerGateway {
         }
     }
 
+    async _handleAssistantNotification(request, response, suffix) {
+        const host = '127.0.0.1:' + this.server.address().port;
+
+        if (request.headers.host !== host || request.headers.origin ||
+            !['127.0.0.1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)) {
+            this._sendJSON(response, 403, { error: 'Assistant notifications can only be configured locally by Studio.' });
+            return;
+        }
+
+        const parts = suffix.split('/');
+        let identity;
+
+        try {
+            if (parts.length !== 2 || !/^[a-f0-9]{64}$/.test(parts[0])) {
+                throw new Error('Invalid authorized Worker connection.');
+            }
+
+            identity = AssistantIdentity.fromPath(parts[1]);
+        } catch (error) {
+            console.warn('Invalid local assistant identity: ' + error.name);
+            this._sendJSON(response, 400, { error: 'Invalid assistant identity.' });
+            return;
+        }
+
+        const connectionId = parts[0];
+
+        if (request.method === 'GET') {
+            this._sendJSON(response, 200, this.notifications.assistantStatus(connectionId, identity));
+            return;
+        }
+        if (request.method !== 'PUT') {
+            response.setHeader('allow', 'GET, PUT');
+            this._sendJSON(response, 405, { error: 'Method not allowed' });
+            return;
+        }
+
+        try {
+            if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) {
+                throw new WebhookError('請提供 JSON 通知設定。');
+            }
+
+            const settings = await this._readJSON(request, 8192);
+
+            if (!settings || typeof settings !== 'object' || Object.keys(settings).length !== 1 ||
+                !Object.hasOwn(settings, 'webhook')) {
+                throw new WebhookError('請提供助理的通知接收端設定。');
+            }
+
+            const result = await this.notifications.configureAssistant(connectionId, identity, settings.webhook);
+
+            this._sendJSON(response, 200, result);
+        } catch (error) {
+            const message = WebhookError.messageFor(error);
+            console.warn('Assistant notification configuration failed: ' + message);
+            this._sendJSON(response, 400, { error: message });
+        }
+    }
+
     async _handleRequest(request, response) {
         const pathname = new URL(request.url, 'http://localhost').pathname;
         if (pathname.startsWith('/notifications/setup/')) {
@@ -378,6 +446,11 @@ export class WorkerGateway {
         if (!this._isAuthorized(request)) {
             response.setHeader('www-authenticate', 'Bearer');
             this._sendJSON(response, 401, { error: 'Authentication required' });
+            return;
+        }
+
+        if (pathname.startsWith('/notifications/assistants/')) {
+            await this._handleAssistantNotification(request, response, pathname.slice('/notifications/assistants/'.length));
             return;
         }
 

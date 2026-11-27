@@ -411,3 +411,89 @@ test('an assistant reading only the first text block can pair the original Job a
         await isolated.close();
     }
 });
+
+class AssistantNotificationScenario extends NotificationScenario {
+    async assistant(identity, webhook, token = NotificationScenario.clientToken, origin) {
+        const scope = 'a'.repeat(64);
+        const encoded = Buffer.from(JSON.stringify(identity)).toString('base64url');
+        const response = await fetch(this.address + '/notifications/assistants/' + scope + '/' + encoded, {
+            method: webhook === undefined ? 'GET' : 'PUT',
+            headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json',
+                ...(origin ? { origin } : {}) },
+            ...(webhook === undefined ? {} : { body: JSON.stringify({ webhook }) }),
+        });
+
+        return { status: response.status, data: await response.json() };
+    }
+}
+
+test('two assistants sharing the same connection can recover their own notification routes before dispatch', async () => {
+    const scenario = new AssistantNotificationScenario();
+    const first = { type: 'bot', platform: 'rakazo', botId: 'bot-a' };
+    const second = { type: 'bot', platform: 'rakazo', botId: 'bot-b' };
+    const manual = { type: 'agentAddress', address: 'codex@example.test' };
+
+    try {
+        await scenario.start();
+        const webhook = { url: scenario.webhookURL, header: 'Authorization', secret: 'first-key' };
+
+        assert.equal((await scenario.assistant(first, webhook, 'wrong-key')).status, 401);
+        assert.equal((await scenario.assistant(first, webhook, NotificationScenario.clientToken,
+            'https://untrusted.example')).status, 403);
+        assert.equal(scenario.callbacks.length, 0);
+
+        const registered = await scenario.assistant(first, webhook);
+
+        assert.equal(registered.status, 200, 'The owner can register a Bot before any Job.');
+        assert.equal(registered.data.enabled, true);
+        assert.equal((await scenario.assistant(second)).data.registered, false);
+        const other = await scenario.assistant(second, { ...webhook, secret: 'second-key' });
+        assert.notEqual(other.data.notificationRouteId, registered.data.notificationRouteId);
+
+        const address = await scenario.assistant(manual, null);
+
+        assert.equal(address.data.registered, true);
+        assert.equal(address.data.enabled, false);
+        assert.equal(scenario.callbacks.length, 2);
+        assert.equal(scenario.dispatches.length, 0);
+
+        await scenario.restartGateway();
+        const saved = await scenario.assistant({ botId: 'bot-a', platform: 'rakazo', type: 'bot' });
+
+        assert.equal(saved.data.notificationRouteId, registered.data.notificationRouteId);
+
+        const jobs = [];
+        for (const route of [saved.data.notificationRouteId, other.data.notificationRouteId, address.data.notificationRouteId]) {
+            const started = await scenario.rpc('work_start', {
+                task: 'Build a walking tracker', requestId: 'assistant-' + route.slice(0, 8), notificationRouteId: route,
+            });
+            assert.equal(started.body.result.structuredContent.notificationBound, route !== address.data.notificationRouteId);
+            const jobId = started.body.result.structuredContent.job.jobId;
+            jobs.push(jobId);
+            await scenario.finish(jobId);
+        }
+
+        const denied = await scenario.rpc('work_continue', {
+            jobId: jobs[0], message: 'Wrong assistant', requestId: 'wrong-assistant',
+            notificationRouteId: other.data.notificationRouteId,
+        });
+
+        assert.equal(denied.body.result.isError, true);
+        assert.equal(scenario.dispatches.length, 3);
+
+        for (const [index, route] of [[0, saved.data.notificationRouteId], [2, address.data.notificationRouteId]]) {
+            const continued = await scenario.rpc('work_continue', {
+                jobId: jobs[index], message: 'Add a weekly goal', requestId: 'correct-' + index,
+                notificationRouteId: route,
+            });
+            assert.equal(continued.body.result.structuredContent.notificationBound, index === 0);
+            await scenario.finish(jobs[index]);
+        }
+
+        assert.deepEqual(scenario.callbacks.filter((item) => item.event.event === 'work.turn_finished')
+            .map((item) => item.authorization), ['Bearer first-key', 'Bearer second-key', 'Bearer first-key']);
+        assert.equal(scenario.dispatches.length, 5);
+    } finally {
+        await scenario.close();
+    }
+});
