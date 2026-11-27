@@ -197,6 +197,7 @@ export class WorkerGateway {
         }
 
         const directStart = payload.method === 'tools/call' && payload.params?.name === 'work_start';
+        const directContinue = payload.method === 'tools/call' && payload.params?.name === 'work_continue';
         let route;
         try {
             route = directStart
@@ -213,11 +214,13 @@ export class WorkerGateway {
             ? { ...payload, params: { ...payload.params, arguments: route.cleaned } }
             : payload;
         const upstreamResponse = await this.upstream.forward(forwarded, protocolVersion);
-        if (directStart && upstreamResponse.status === 200 &&
+        if ((directStart || directContinue) && upstreamResponse.status === 200 &&
             upstreamResponse.contentType.includes('application/json')) {
             const message = JSON.parse(upstreamResponse.body);
             if (message.result && message.result.isError !== true && !message.error) {
-                message.result = await this.notifications.recordDispatch(route.notificationRouteId, message.result);
+                message.result = directStart
+                    ? await this.notifications.recordDispatch(route.notificationRouteId, message.result)
+                    : this.notifications.describeBinding(message.result);
 
                 return { ...upstreamResponse, body: JSON.stringify(message) };
             }
@@ -231,7 +234,7 @@ export class WorkerGateway {
                 message.result.instructions = [
                     message.result.instructions,
                     guide,
-                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. After a successful first dispatch ask once whether the user wants callbacks; if yes create and verify the assistant\'s native webhook receiver BEFORE calling worker_notification_setup with the dispatch notificationSetupToken, privately SAVE setupId BEFORE showing the local webhook form. When the user returns, and BEFORE any later dispatch if setup is pending, call worker_notification_pairing_status with that saved setupId; successful receipts survive browser expiry and restart for 30 days. Privately save the returned notificationRouteId, verify worker_notification_status, and only then clear the pending setupId. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
+                    'User-facing delivery rule: hide job IDs, branches, worktrees and commit details unless asked. Workers should commit verified meaningful milestones automatically. Notifications are NOT linked to the shared MCP bearer. After a successful first dispatch privately save its jobId and notificationSetupToken BEFORE asking once whether the user wants callbacks; if yes, immediately create and verify the assistant\'s native webhook receiver in the same turn WITHOUT asking again, then call worker_notification_setup with the REQUIRED dispatch notificationSetupToken, privately SAVE setupId BEFORE showing the local webhook form. When the user returns, and BEFORE any later dispatch if setup is pending, call worker_notification_pairing_status with that saved setupId; successful receipts survive browser expiry and restart for 30 days. Confirm notificationBound=true and matching original jobId; privately save the returned notificationRouteId, verify worker_notification_status, and only then clear the pending setupId. Verify notificationBound on start and continuation responses before promising callbacks. Include notificationRouteId in every work_start or worker_task_start for THIS assistant. It is stripped by the Gateway before dispatch to upstream Fleet. For a declined preference, worker_notification_decline returns a reusable off-route to retain; without a routeId no notifications occur. A routeId is a sensitive bearer routing capability, not a public assistant name. Other assistants may share the exact same MCP connection; never ask to change their MCP key. To deliver results on the local Worker PC, prefer worker_delivery_open to open Explorer directly and return the actual folderPath (no URL). The fallback worker_delivery_link also supplies folderPath and only provides a localhost link as an optional click action. The job state may be running even if files exist; do not claim completion without verified output.',
                 ].filter(Boolean).join('\n\n');
                 return { status: 200, body: JSON.stringify(message), contentType: 'application/json' };
             }
@@ -255,11 +258,24 @@ export class WorkerGateway {
                 description: 'Optional private route handle returned by worker_notification_pairing_status. The Gateway strips it before calling Fleet.',
             };
         }
+        if (workStartTool) {
+            workStartTool.description += ' Save the returned private notificationSetupToken and jobId before asking about notifications. A setup without this token is rejected. Verify notificationBound before promising callbacks.';
+        }
+
         if (workStartTool?.outputSchema?.properties) {
             workStartTool.outputSchema.properties.notificationSetupToken = {
                 type: 'string', pattern: '^[a-f0-9]{64}$',
                 description: 'Private short-lived capability returned only for a new unrouted Job.',
             };
+        }
+
+        for (const name of ['work_start', 'work_continue']) {
+            const tool = message.result.tools.find((candidate) => candidate.name === name);
+            if (tool?.outputSchema?.properties) {
+                tool.outputSchema.properties.notificationBound = {
+                    type: 'boolean', description: 'Whether this Job actually has an enabled notification route. False means no automatic completion callback.',
+                };
+            }
         }
 
         const occupiedNames = new Set(message.result.tools.map((tool) => tool.name));

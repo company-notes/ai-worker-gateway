@@ -15,7 +15,10 @@ test('the shared MCP bearer authorizes tools, but does not identify a bot or rev
 });
 
 test('pairing form is local-only, same-origin and does not leak receiver secret to MCP', async () => {
-    const setup = await scenario.rpc('worker_notification_setup');
+    const startedForPairing = await scenario.rpc('work_start', { task: 'Prepare initial work', requestId: 'browser-pairing' });
+    const setup = await scenario.rpc('worker_notification_setup', {
+        notificationSetupToken: startedForPairing.body.result.structuredContent.notificationSetupToken,
+    });
     const { setupId, url } = setup.body.result.structuredContent;
     assert.ok(url.startsWith(scenario.address));
     assert.equal((await fetch(url)).status, 200);
@@ -194,7 +197,10 @@ test('owner can retry a rejected key on the same page and paste the complete Rak
 
     try {
         await isolated.start();
-        const setup = await isolated.rpc('worker_notification_setup');
+        const started = await isolated.rpc('work_start', { task: 'Build a small tool', requestId: 'retry-pairing' });
+        const setup = await isolated.rpc('worker_notification_setup', {
+            notificationSetupToken: started.body.result.structuredContent.notificationSetupToken,
+        });
         const { url, setupId } = setup.body.result.structuredContent;
         const browser = await chromium.launch();
 
@@ -239,7 +245,10 @@ test('an owner can authorize now and the assistant can claim the route after lin
 
     try {
         await isolated.start();
-        const setup = await isolated.rpc('worker_notification_setup');
+        const startedForPairing = await isolated.rpc('work_start', { task: 'Build initial tool', requestId: 'durable-pairing' });
+        const setup = await isolated.rpc('worker_notification_setup', {
+            notificationSetupToken: startedForPairing.body.result.structuredContent.notificationSetupToken,
+        });
         const { url, setupId } = setup.body.result.structuredContent;
         const browserNonce = new URL(url).pathname.split('/').at(-1);
 
@@ -286,6 +295,69 @@ test('an owner can authorize now and the assistant can claim the route after lin
         assert.ok(isolated.callbacks.slice(1).every((item) => item.event.jobId === jobID));
     } finally {
         context.mock.timers.reset();
+        await isolated.close();
+    }
+});
+
+test('missing first Job token cannot create a misleading receiver-only pairing', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a habit tracker', requestId: 'habit-first' });
+        const { job, notificationSetupToken, notificationBound } = started.body.result.structuredContent;
+        assert.equal(notificationBound, false);
+
+        const missing = await isolated.rpc('worker_notification_setup', {});
+        assert.equal(missing.body.result.isError, true, 'An omitted Job token must fail before a form can be issued.');
+        assert.equal(isolated.callbacks.length, 0);
+
+        const unbound = await isolated.rpc('work_continue', {
+            jobId: job.jobId, message: 'Refine existing requirements', requestId: 'habit-unbound-followup',
+        });
+        assert.equal(unbound.body.result.structuredContent.notificationBound, false);
+
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        assert.equal(setup.body.result.structuredContent.jobId, job.jobId);
+
+        await isolated.authorize(setup.body.result.structuredContent.url);
+        const paired = await isolated.rpc('worker_notification_pairing_status', { setupId: setup.body.result.structuredContent.setupId });
+        assert.equal(paired.body.result.structuredContent.jobId, job.jobId);
+        assert.equal(paired.body.result.structuredContent.notificationBound, true);
+
+        await isolated.finish(job.jobId);
+        const continued = await isolated.rpc('work_continue', {
+            jobId: job.jobId, message: 'Add weekly targets', requestId: 'habit-followup',
+        });
+        assert.equal(continued.body.result.structuredContent.notificationBound, true);
+
+        await isolated.finish(job.jobId);
+        assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
+            ['work.webhook_test', 'work.turn_finished', 'work.turn_finished']);
+    } finally {
+        await isolated.close();
+    }
+});
+
+test('a paired Job receives an idle-to-idle Fleet turn_finished event without duplicating earlier completions', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a habit tracker', requestId: 'quick-turn-start' });
+        const { job, notificationSetupToken } = started.body.result.structuredContent;
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        await isolated.authorize(setup.body.result.structuredContent.url);
+        await isolated.finish(job.jobId);
+
+        await isolated.finish(job.jobId, { type: 'turn_finished', fromState: 'idle' });
+
+        assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
+            ['work.webhook_test', 'work.turn_finished', 'work.turn_finished'],
+            'Fleet can report a full turn completed between its own idle polls.');
+        await isolated.gateway.notifications.poll();
+        assert.equal(isolated.callbacks.length, 3);
+    } finally {
         await isolated.close();
     }
 });

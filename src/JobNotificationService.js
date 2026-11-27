@@ -49,10 +49,10 @@ export class JobNotificationService {
             },
             {
                 name: 'worker_notification_setup',
-                description: 'Only after the first work dispatch and explicit consent AND verified creation of the assistant webhook receiver, obtain a local setup URL. Pass the private notificationSetupToken returned by that dispatch to attach the original Job. The owner enters the receiver URL and key locally; no assistant name. An explicit standalone notification settings request may omit the token. Then call worker_notification_pairing_status with setupId.',
+                description: 'Only after the first work dispatch and explicit consent AND verified creation of the assistant webhook receiver, obtain a local setup URL. Pass the private notificationSetupToken returned by that dispatch to attach the original Job. The owner enters the receiver URL and key locally; no assistant name. notificationSetupToken is REQUIRED; empty arguments cannot create a receiver-only route. Then call worker_notification_pairing_status with setupId and verify notificationBound and the original jobId.',
                 inputSchema: { type: 'object', properties: {
                     notificationSetupToken: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-                }, additionalProperties: false },
+                }, required: ['notificationSetupToken'], additionalProperties: false },
             },
             {
                 name: 'worker_notification_pairing_status',
@@ -141,15 +141,17 @@ export class JobNotificationService {
             throw new Error('Gateway webhook storage is not enabled.');
         }
 
+        if (typeof notificationSetupToken !== 'string' || !/^[a-f0-9]{64}$/.test(notificationSetupToken)) {
+            throw new Error('notificationSetupToken is required: use the private token from the original successful work_start. Do not create another Job to recover a missing token.');
+        }
+
         const nonce = randomBytes(24).toString('base64url');
         const setupId = randomBytes(24).toString('base64url');
         const now = Date.now();
         this._prune(this.tickets, now);
         this._prune(this.attachments, now);
 
-        if (notificationSetupToken !== undefined) {
-            this._attachment(notificationSetupToken);
-        }
+        const attachment = this._attachment(notificationSetupToken);
         if (this.tickets.size >= 50) {
             throw new Error('Too many unused webhook pairing links.');
         }
@@ -158,6 +160,7 @@ export class JobNotificationService {
         return {
             url: 'http://127.0.0.1:' + port + '/notifications/setup/' + nonce,
             setupId,
+            jobId: attachment.jobId,
             label: '設定完成通知',
             instruction: 'Save setupId privately BEFORE showing the browser URL. Never display setupId. After the user authorizes, or before any later dispatch, call worker_notification_pairing_status with the saved setupId; a successful receipt can be retrieved for 30 days after authorization, even after a restart. Save the returned route, verify status, then include it in new work. Do not repeat setup merely because the browser URL expired.',
             validForMinutes: 10,
@@ -170,7 +173,8 @@ export class JobNotificationService {
         if (receipt) {
             return {
                 paired: true, ...receipt,
-                detail: 'Save the route in private assistant configuration, verify worker_notification_status, then use it for every new task. Clear the pending setupId only after saving and verification. Do not show either identifier to the user.',
+                notificationBound: !!receipt.jobId && this._isBound(receipt.jobId, receipt.notificationRouteId),
+                detail: 'Verify notificationBound and the original jobId before promising notifications for this Job. Save the route privately and verify worker_notification_status before new dispatch. Clear the pending setupId only after saving and verification. Do not show either identifier to the user.',
             };
         }
 
@@ -224,9 +228,7 @@ export class JobNotificationService {
                 return this.renderSetup(nonce);
             }
 
-            if (ticket.notificationSetupToken !== undefined) {
-                this._attachment(ticket.notificationSetupToken);
-            }
+            this._attachment(ticket.notificationSetupToken);
         } catch {
             return this._page('設定連結已失效', '<h1>設定連結已失效</h1><p>請回到助理重新取得設定連結；不需要重新派工或配對 Worker。</p>');
         }
@@ -283,64 +285,88 @@ export class JobNotificationService {
     async _savePairing(ticket, webhook) {
         const enabledAt = new Date().toISOString();
         const token = ticket.notificationSetupToken;
-        const attachment = token === undefined ? null : this._attachment(token);
+        const attachment = this._attachment(token);
+        const job = (await this.upstream.callTool('work_status', { jobId: attachment.jobId })).structuredContent;
+
+        if (!job || job.jobId !== attachment.jobId) {
+            throw new Error('The originally dispatched Job could not be verified.');
+        }
+
         let initial = null;
 
-        if (attachment) {
-            const job = (await this.upstream.callTool('work_status', { jobId: attachment.jobId })).structuredContent;
-            if (!job || job.jobId !== attachment.jobId) {
-                throw new Error('The originally dispatched Job could not be verified.');
-            }
+        if (notifyingStates.has(job.state) && job.waitingOnDelegatedWork !== true) {
+            const event = (job.recentEvents ?? []).filter((item) =>
+                item.jobId === job.jobId && this._isNotificationEvent(item) &&
+                item.toState === job.state && /^\d{1,15}$/.test(item.cursor))
+                .sort((a, b) => Number(b.cursor) - Number(a.cursor))[0];
 
-            if (notifyingStates.has(job.state) && job.waitingOnDelegatedWork !== true) {
-                const event = (job.recentEvents ?? []).filter((item) =>
-                    item.jobId === job.jobId && item.type === 'state_changed' &&
-                    item.toState === job.state && /^\d{1,15}$/.test(item.cursor))
-                    .sort((a, b) => Number(b.cursor) - Number(a.cursor))[0];
-
-                if (event) {
-                    initial = this._notification(null, { name: '助理' }, job, event);
-                }
+            if (event) {
+                initial = this._notification(null, { name: '助理' }, job, event);
             }
         }
 
         ticket.notificationRouteId = await this.store.createRoute({
-            name: '助理', webhook, enabledAt, jobId: attachment?.jobId, initial, setupId: ticket.setupId,
+            name: '助理', webhook, enabledAt, jobId: attachment.jobId, initial, setupId: ticket.setupId,
         });
 
-        if (attachment) {
-            this.attachments.delete(token);
+        this.attachments.delete(token);
+    }
+
+    _isBound(jobId, routeId) {
+        const profileId = this.store.data.jobs[jobId];
+        const profile = profileId && this.store.profileFor(profileId);
+
+        return !!profile?.webhook && profile.preference === 'on' &&
+            (routeId === undefined || this.store.resolveRoute(routeId) === profileId);
+    }
+
+    describeBinding(response) {
+        const jobId = response?.structuredContent?.job?.jobId;
+
+        if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || response.isError === true) {
+            return response;
         }
+
+        const notificationBound = this._isBound(jobId);
+
+        return {
+            ...response,
+            structuredContent: { ...response.structuredContent, notificationBound },
+            content: [...response.content, { type: 'text', text: JSON.stringify({ jobId, notificationBound,
+                instruction: notificationBound
+                    ? 'This Job has an enabled notification route; only promise delivery to this assistant if you verified its pairing.'
+                    : 'This Job has NO enabled notification binding. Do not promise completion notifications.' }) }],
+        };
     }
 
     async recordDispatch(routeId, response) {
         if (routeId !== undefined) {
             await this.trackJob(routeId, response);
-            return response;
+            return this.describeBinding(response);
         }
 
         const jobId = response?.structuredContent?.job?.jobId;
         if (!this.store.active || response?.isError === true || response?.structuredContent?.created !== true ||
             typeof jobId !== 'string' || !jobIdPattern.test(jobId) || this.store.data.jobs[jobId]) {
-            return response;
+            return this.describeBinding(response);
         }
 
         const now = Date.now();
         this._prune(this.attachments, now);
 
         if (this.attachments.size >= 5000) {
-            return response;
+            return this.describeBinding(response);
         }
 
         const notificationSetupToken = randomBytes(32).toString('hex');
         this.attachments.set(notificationSetupToken, { jobId, expiresAt: now + attachmentTtlMs });
 
-        return {
+        return this.describeBinding({
             ...response,
             structuredContent: { ...response.structuredContent, notificationSetupToken },
             content: [...response.content, { type: 'text', text: JSON.stringify({ notificationSetupToken,
-                instruction: 'Keep private. After dispatch ask once about notifications; pass this token to worker_notification_setup only after consent and receiver creation.' }) }],
-        };
+                instruction: 'Persist this private token with the original Job before asking about notifications. After consent, create the receiver and use this REQUIRED token in worker_notification_setup; never call setup with empty arguments.' }) }],
+        });
     }
 
     async trackJob(routeId, response) {
@@ -349,7 +375,7 @@ export class JobNotificationService {
         }
         const profileId = this.resolveRoute(routeId);
         const job = response?.structuredContent?.job;
-        if (jobIdPattern.test(job?.jobId) && response?.isError !== true) {
+        if (typeof job?.jobId === 'string' && jobIdPattern.test(job.jobId) && response?.isError !== true) {
             await this.store.trackJob(profileId, job.jobId);
         }
     }
@@ -384,12 +410,18 @@ export class JobNotificationService {
         };
     }
 
+    _isNotificationEvent(event) {
+        // Fleet can observe an entire external turn between two idle checks.
+        // State transitions already have their own event, so only handle same-state turn_finished here.
+        return (event.type === 'state_changed' && notifyingStates.has(event.toState)) ||
+            (event.type === 'turn_finished' && event.fromState === 'idle' && event.toState === 'idle');
+    }
+
     async _collect(events) {
         const notifications = [];
         for (const event of events) {
-            if (event.type !== 'state_changed' ||
-                !notifyingStates.has(event.toState) ||
-                !jobIdPattern.test(event.jobId)) {
+            if (!this._isNotificationEvent(event) ||
+                typeof event.jobId !== 'string' || !jobIdPattern.test(event.jobId)) {
                 continue;
             }
             const profileId = this.store.data.jobs[event.jobId];

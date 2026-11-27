@@ -154,13 +154,13 @@ export class NotificationScenario {
         return { status: response.status, body: await response.json() };
     }
 
-    async finish(jobID) {
+    async finish(jobID, event = {}) {
         const job = this.jobs.get(jobID);
         assert.ok(job, 'Only an existing Job can finish.');
         job.state = 'idle';
 
         this.events.push({ cursor: String(this.events.length + 1), jobId: jobID,
-            type: 'state_changed', toState: 'idle', at: new Date().toISOString() });
+            type: 'state_changed', toState: 'idle', at: new Date().toISOString(), ...event });
         await this.gateway.notifications.poll();
     }
 
