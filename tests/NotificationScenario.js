@@ -91,7 +91,15 @@ export class NotificationScenario {
     async start() {
         this.folder = await mkdtemp(path.join(os.tmpdir(), 'awg-form-route-test-'));
         this.receiver = createServer(async (request, response) => {
-            this.callbacks.push({ authorization: request.headers.authorization, event: await this._readJSON(request) });
+            const event = await this._readJSON(request);
+
+            if (this.receiverAuthorization && request.headers.authorization !== this.receiverAuthorization) {
+                response.writeHead(401);
+                response.end();
+                return;
+            }
+
+            this.callbacks.push({ authorization: request.headers.authorization, event });
             response.writeHead(204);
             response.end();
         });

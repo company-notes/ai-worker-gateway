@@ -344,7 +344,7 @@ export class WorkerGateway {
             response.end(page);
         } catch (error) {
             response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
-            response.end('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><p>設定未完成。請確認欄位及 Webhook 接收端，再透過助理重新取得設定連結。</p></html>');
+            response.end(this.notifications.renderSetupFailure(nonce, error));
         }
     }
 

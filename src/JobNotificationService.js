@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { NotificationStore } from './NotificationStore.js';
-import { validateWebhook, WebhookSender } from './WebhookSender.js';
+import { validateWebhook, WebhookError, WebhookSender } from './WebhookSender.js';
 
 const intervalMs = 30_000;
 const setupTtlMs = 10 * 60_000;
@@ -187,7 +187,7 @@ export class JobNotificationService {
         return ticket;
     }
 
-    renderSetup(nonce) {
+    renderSetup(nonce, failure = '') {
         const ticket = this._ticket(nonce);
         if (ticket.notificationRouteId) {
             return this._page('通知已配對', '<h1>通知已設定</h1><p>已驗證 Webhook 接收端。請回到助理，讓助理完成配對確認。</p>');
@@ -196,14 +196,37 @@ export class JobNotificationService {
         const action = '/notifications/setup/' + nonce;
         return this._page('設定完成通知', '<h1>設定完成通知</h1>' +
             '<p>請輸入這位助理自己的通知接收位址與金鑰。所有助理可以共用原本的 MCP 連線，每位助理只需配對一次。</p>' +
+            (failure ? '<p role="alert" style="color:#9b2020">' + html(failure) + ' 請重新輸入網址及金鑰後再試一次。</p>' : '') +
             '<form method="POST" action="' + action + '">' +
             '<label>Webhook 網址<input name="url" type="url" maxlength="2000" placeholder="https://..." required></label>' +
             '<label>金鑰標頭<select name="header"><option value="Authorization">Authorization: Bearer</option>' +
             '<option value="X-Webhook-Key">X-Webhook-Key</option><option value="X-API-Key">X-API-Key</option>' +
             '<option value="X-Webhook-Secret">X-Webhook-Secret</option></select></label>' +
             '<label>Webhook 金鑰<input name="secret" type="password" maxlength="2048" autocomplete="off" required></label>' +
+            '<p>可直接貼上純金鑰、Bearer 金鑰或完整 Authorization: Bearer 金鑰；系統會自動處理相符的標頭。</p>' +
             '<p>Webhook 資料只會加密保存在本機 Gateway；不會出現在助理聊天，也不會更動 MCP 金鑰。</p>' +
             '<button type="submit">測試並儲存通知</button></form>');
+    }
+
+    renderSetupFailure(nonce, error) {
+        try {
+            const ticket = this._ticket(nonce);
+
+            if (ticket.notificationRouteId) {
+                return this.renderSetup(nonce);
+            }
+
+            if (ticket.notificationSetupToken !== undefined) {
+                this._attachment(ticket.notificationSetupToken);
+            }
+        } catch {
+            return this._page('設定連結已失效', '<h1>設定連結已失效</h1><p>請回到助理重新取得設定連結；不需要重新派工或配對 Worker。</p>');
+        }
+
+        const failure = WebhookError.messageFor(error);
+        console.warn('Notification setup failed: ' + failure);
+
+        return this.renderSetup(nonce, failure);
     }
 
     _page(title, content) {
@@ -221,7 +244,7 @@ export class JobNotificationService {
         }
 
         if (ticket.saving) {
-            throw new Error('This webhook pairing is already being saved.');
+            throw new WebhookError('正在驗證這次配對，請稍後再確認。');
         }
 
         const webhook = validateWebhook({
