@@ -32,6 +32,13 @@ test('Session Router skill is discoverable for a new marketing work assignment, 
     assert.match(source, /第一次交辦先實際派工/);
     assert.match(source, /建立成功後才呼叫 `worker_notification_setup/);
     assert.match(source, /表單不需要助理名稱/);
+    assert.match(source, /當輪立即實際呼叫工具建立或確認/);
+    assert.match(source, /notificationSetupToken` 必填，禁止空參數/);
+    assert.match(source, /notificationBound=true/);
+    assert.match(source, /不需要另外安裝 Nuwa Agent Relay Skill/);
+    assert.match(source, /schedule_list/);
+    assert.match(source, /schedule_create/);
+    assert.match(source, /on: \{ webhook: true \}/);
     assert.match(source, /同一把 MCP 金鑰.*分流/);
     assert.match(source, /worker_notification_pairing_status/);
     assert.match(source, /通知已開啟時.*notificationRouteId/);

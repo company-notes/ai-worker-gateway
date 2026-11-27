@@ -329,3 +329,25 @@ test('missing first Job token cannot create a misleading receiver-only pairing',
         await isolated.close();
     }
 });
+
+test('a paired Job receives an idle-to-idle Fleet turn_finished event without duplicating earlier completions', async () => {
+    const isolated = new FirstJobPairingScenario();
+
+    try {
+        await isolated.start();
+        const started = await isolated.rpc('work_start', { task: 'Build a habit tracker', requestId: 'quick-turn-start' });
+        const { job, notificationSetupToken } = started.body.result.structuredContent;
+        const setup = await isolated.rpc('worker_notification_setup', { notificationSetupToken });
+        await isolated.authorize(setup.body.result.structuredContent.url);
+        await isolated.finish(job.jobId);
+
+        await isolated.finish(job.jobId, { type: 'turn_finished', fromState: 'idle' });
+        assert.deepEqual(isolated.callbacks.map((item) => item.event.event),
+            ['work.webhook_test', 'work.turn_finished', 'work.turn_finished'],
+            'Fleet can report a full turn completed between its own idle polls.');
+        await isolated.gateway.notifications.poll();
+        assert.equal(isolated.callbacks.length, 3);
+    } finally {
+        await isolated.close();
+    }
+});
