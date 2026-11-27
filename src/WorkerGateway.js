@@ -399,6 +399,7 @@ export class WorkerGateway {
         }
 
         const connectionId = parts[0];
+
         if (request.method === 'GET') {
             this._sendJSON(response, 200, this.notifications.assistantStatus(connectionId, identity));
             return;
@@ -415,6 +416,7 @@ export class WorkerGateway {
             }
 
             const settings = await this._readJSON(request, 8192);
+
             if (!settings || typeof settings !== 'object' || Object.keys(settings).length !== 1 ||
                 !Object.hasOwn(settings, 'webhook')) {
                 throw new WebhookError('請提供助理的通知接收端設定。');

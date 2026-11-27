@@ -443,6 +443,7 @@ test('two assistants sharing the same connection can recover their own notificat
         assert.equal(scenario.callbacks.length, 0);
 
         const registered = await scenario.assistant(first, webhook);
+
         assert.equal(registered.status, 200, 'The owner can register a Bot before any Job.');
         assert.equal(registered.data.enabled, true);
         assert.equal((await scenario.assistant(second)).data.registered, false);
@@ -450,6 +451,7 @@ test('two assistants sharing the same connection can recover their own notificat
         assert.notEqual(other.data.notificationRouteId, registered.data.notificationRouteId);
 
         const address = await scenario.assistant(manual, null);
+
         assert.equal(address.data.registered, true);
         assert.equal(address.data.enabled, false);
         assert.equal(scenario.callbacks.length, 2);
@@ -457,6 +459,7 @@ test('two assistants sharing the same connection can recover their own notificat
 
         await scenario.restartGateway();
         const saved = await scenario.assistant({ botId: 'bot-a', platform: 'rakazo', type: 'bot' });
+
         assert.equal(saved.data.notificationRouteId, registered.data.notificationRouteId);
 
         const jobs = [];
@@ -474,6 +477,7 @@ test('two assistants sharing the same connection can recover their own notificat
             jobId: jobs[0], message: 'Wrong assistant', requestId: 'wrong-assistant',
             notificationRouteId: other.data.notificationRouteId,
         });
+
         assert.equal(denied.body.result.isError, true);
         assert.equal(scenario.dispatches.length, 3);
 

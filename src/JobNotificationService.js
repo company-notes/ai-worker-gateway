@@ -350,6 +350,7 @@ export class JobNotificationService {
 
     verifyContinuation(routeId, jobId) {
         const profileId = this.resolveRoute(routeId);
+
         if (typeof jobId !== 'string' || !jobIdPattern.test(jobId) || this.store.data.jobs[jobId] !== profileId) {
             throw new Error('This Job is not bound to the specified assistant. Use the original assistant identity.');
         }
