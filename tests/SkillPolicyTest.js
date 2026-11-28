@@ -62,3 +62,14 @@ test('OpenMausBot installation acceptance distinguishes a file path from an enab
     assert.match(guide, /第一個實際工作工具.*Gateway/);
     assert.match(guide, /Pilot-only Fleet 權限阻斷/);
 });
+
+test('an offline paired Rakazo Worker still requires native receiver preparation before owner handoff', async () => {
+    const source = await readFile(skillURL, 'utf8');
+    const connection = source.slice(source.indexOf('## Nuwa Studio：'), source.indexOf('## 不可混淆的概念'));
+
+    assert.match(connection, /已配對但離線時仍須先建立或核對自己的 Webhook Routine/);
+    assert.match(connection, /Rakazo 不得使用 Agent Address 手動模式/);
+    assert.match(connection, /直接在聊天中提供可點擊連結/);
+    assert.match(connection, /不得呼叫 Computer Use/);
+    assert.match(connection, /type、platform、botId 三個欄位/);
+});
